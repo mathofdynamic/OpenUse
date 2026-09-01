@@ -1,0 +1,27 @@
+{
+  "name": "@openuse/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@openuse/ai": "workspace:*",
+    "@openuse/computer": "workspace:*",
+    "@openuse/permissions": "workspace:*",
+    "@openuse/shared": "workspace:*",
+    "ai": "7.0.87",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

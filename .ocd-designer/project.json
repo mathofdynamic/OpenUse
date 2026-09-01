@@ -1,0 +1,24 @@
+{
+  "schema_version": "0.2.0",
+  "project_id": "openuse",
+  "mode": "build",
+  "stage": "BUILDING",
+  "classification": "unknown",
+  "repo": {
+    "path": ".",
+    "head": "unversioned",
+    "remote": null
+  },
+  "deployment_url": null,
+  "deployment_identity": null,
+  "deployment_identity_type": null,
+  "deployment_identity_evidence": null,
+  "brand": {
+    "version": "0.1.0",
+    "hash": "eec8986e323a236e650b253d5f460849a5821003d57239bfe49a21091a602c90",
+    "approval_status": "confirmed"
+  },
+  "active_run": "run-20260901T140910Z",
+  "config_hash": "f372082048bd18111f7ad4586ddaa6dbe07e11c6f4144f00d835859d220f017a",
+  "updated_at": "2026-09-01T15:15:00Z"
+}

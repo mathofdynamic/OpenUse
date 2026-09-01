@@ -1,0 +1,23 @@
+{
+  "schema_version": "0.2.0",
+  "viewports": [
+    "mobile",
+    "tablet",
+    "desktop"
+  ],
+  "browsers": [
+    "project-default"
+  ],
+  "accessibility_target": "WCAG 2.2 AA",
+  "release_threshold": {
+    "minimum_score": 85,
+    "minimum_category_score": 3,
+    "minimum_evidence_coverage": 0.9
+  },
+  "evidence_policy": "durable-local",
+  "required_protocols": {
+    "motion": "auto",
+    "discoverability": "auto",
+    "accessibility": "required"
+  }
+}

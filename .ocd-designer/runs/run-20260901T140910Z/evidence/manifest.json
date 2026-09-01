@@ -1,0 +1,174 @@
+{
+  "schema_version": "0.2.0",
+  "source_fingerprint": "84e69419ab70cbaf2e0ede263bcb73f7692d1a0b20e2d20389598cb9a0b9a17c",
+  "required_matrix": [
+    {
+      "id": "M-BRAND-APPROVAL",
+      "protocol": "brand",
+      "required": true,
+      "evidence_kinds": [
+        "user_confirmation"
+      ]
+    },
+    {
+      "id": "M-DIRECTION-APPROVAL",
+      "protocol": "direction",
+      "required": true,
+      "evidence_kinds": [
+        "user_confirmation"
+      ]
+    },
+    {
+      "id": "M-UI-PREVIEW",
+      "protocol": "visual",
+      "required": true,
+      "evidence_kinds": [
+        "dom",
+        "accessibility"
+      ]
+    },
+    {
+      "id": "M-IMPLEMENTATION-CHECKS",
+      "protocol": "runtime",
+      "required": true,
+      "evidence_kinds": [
+        "runtime",
+        "source"
+      ]
+    },
+    {
+      "id": "M-RELEASE-ACCEPTANCE",
+      "protocol": "acceptance",
+      "required": false,
+      "evidence_kinds": [
+        "user_confirmation"
+      ]
+    },
+    {
+      "id": "M-MOTION-STATIC-EXCEPTION",
+      "protocol": "motion",
+      "required": false,
+      "evidence_kinds": [
+        "user_confirmation"
+      ]
+    },
+    {
+      "id": "M-DEPLOYMENT-IDENTITY",
+      "protocol": "discoverability",
+      "required": false,
+      "evidence_kinds": [
+        "http"
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": "E-0001",
+      "kind": "user_confirmation",
+      "protocol": "brand",
+      "matrix_id": "M-BRAND-APPROVAL",
+      "path": ".ocd-designer/runs/run-20260901T140910Z/evidence/artifacts/E-0001-user_confirmation.md",
+      "sha256": "d5183935fb08b48daff7f2f32a02c95eeb2d3d616bc8dfc1ad612a703087c14a",
+      "commit": "b2f98668d06af49a7c05be1bc4323d16654abf6df8cd9b3f9e2e0354b89cc4d4",
+      "captured_at": "2026-09-01T15:14:23Z",
+      "durable": true,
+      "route": null,
+      "state": null,
+      "viewport": null,
+      "browser": null,
+      "locale": null,
+      "direction": null,
+      "notes": "User implementation brief used as the confirmed product and visual source for this pass."
+    },
+    {
+      "id": "E-0002",
+      "kind": "user_confirmation",
+      "protocol": "direction",
+      "matrix_id": "M-DIRECTION-APPROVAL",
+      "path": ".ocd-designer/runs/run-20260901T140910Z/evidence/artifacts/E-0002-user_confirmation.md",
+      "sha256": "043b8ae675fbb95ea76ad89ab308310c08c3c075e22cfd27c83a284e1c28bd5d",
+      "commit": "b2f98668d06af49a7c05be1bc4323d16654abf6df8cd9b3f9e2e0354b89cc4d4",
+      "captured_at": "2026-09-01T15:14:47Z",
+      "durable": true,
+      "route": null,
+      "state": null,
+      "viewport": null,
+      "browser": null,
+      "locale": null,
+      "direction": null,
+      "notes": "User brief-confirmed control-room architecture and visual direction."
+    },
+    {
+      "id": "E-0003",
+      "kind": "runtime",
+      "protocol": "runtime",
+      "matrix_id": "M-IMPLEMENTATION-CHECKS",
+      "path": ".ocd-designer/runs/run-20260901T140910Z/evidence/artifacts/E-0003-runtime.md",
+      "sha256": "1fdd2a91d6118a191413eca0762559c7da84a8d7758224764cc76e37f474c0bb",
+      "commit": "b2f98668d06af49a7c05be1bc4323d16654abf6df8cd9b3f9e2e0354b89cc4d4",
+      "captured_at": "2026-09-01T15:15:10Z",
+      "durable": true,
+      "route": null,
+      "state": null,
+      "viewport": null,
+      "browser": null,
+      "locale": null,
+      "direction": null,
+      "notes": "Lint, typecheck, tests, build, and Electron boot evidence; native commands explicitly marked unavailable on this host."
+    },
+    {
+      "id": "E-0004",
+      "kind": "dom",
+      "protocol": "visual",
+      "matrix_id": "M-UI-PREVIEW",
+      "path": ".ocd-designer/runs/run-20260901T140910Z/evidence/artifacts/E-0004-dom.md",
+      "sha256": "ccebeae87ce7fffe0bf432e894cec25b0ad58a2783bdac5ad386ffc5b18e095f",
+      "commit": "b2f98668d06af49a7c05be1bc4323d16654abf6df8cd9b3f9e2e0354b89cc4d4",
+      "captured_at": "2026-09-01T15:15:36Z",
+      "durable": true,
+      "route": "control-room",
+      "state": null,
+      "viewport": "1280x800;640x800",
+      "browser": "T3 preview",
+      "locale": null,
+      "direction": null,
+      "notes": "Rendered structure, guarded bridge state, settings surface, and narrow responsive layout verified through preview evaluation."
+    },
+    {
+      "id": "E-0005",
+      "kind": "accessibility",
+      "protocol": "visual",
+      "matrix_id": "M-UI-PREVIEW",
+      "path": ".ocd-designer/runs/run-20260901T140910Z/evidence/artifacts/E-0005-accessibility.md",
+      "sha256": "ccebeae87ce7fffe0bf432e894cec25b0ad58a2783bdac5ad386ffc5b18e095f",
+      "commit": "b2f98668d06af49a7c05be1bc4323d16654abf6df8cd9b3f9e2e0354b89cc4d4",
+      "captured_at": "2026-09-01T15:15:44Z",
+      "durable": true,
+      "route": "control-room",
+      "state": null,
+      "viewport": "1280x800;640x800",
+      "browser": "T3 preview",
+      "locale": null,
+      "direction": null,
+      "notes": "Keyboard-oriented control structure and unavailable bridge state documented from preview inspection."
+    },
+    {
+      "id": "E-0006",
+      "kind": "source",
+      "protocol": "runtime",
+      "matrix_id": "M-IMPLEMENTATION-CHECKS",
+      "path": ".ocd-designer/runs/run-20260901T140910Z/evidence/artifacts/E-0006-source.md",
+      "sha256": "1fdd2a91d6118a191413eca0762559c7da84a8d7758224764cc76e37f474c0bb",
+      "commit": "b2f98668d06af49a7c05be1bc4323d16654abf6df8cd9b3f9e2e0354b89cc4d4",
+      "captured_at": "2026-09-01T15:15:45Z",
+      "durable": true,
+      "route": null,
+      "state": null,
+      "viewport": null,
+      "browser": null,
+      "locale": null,
+      "direction": null,
+      "notes": "Source-level verification record paired with the runtime check artifact."
+    }
+  ]
+}

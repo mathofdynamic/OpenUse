@@ -1,0 +1,53 @@
+{
+  "schema_version": "0.2.0",
+  "run_id": "run-20260901T140910Z",
+  "status": "active",
+  "stage": "BUILDING",
+  "started_at": "2026-09-01T14:09:10Z",
+  "updated_at": "2026-09-01T15:15:00Z",
+  "checkpoints": [
+    {
+      "id": "CP-0001",
+      "from_stage": "DISCOVERY",
+      "stage": "BRAND_PENDING",
+      "status": "completed",
+      "captured_at": "2026-09-01T15:14:18Z",
+      "notes": "Brand brief and visual constraints extracted from the user implementation brief."
+    },
+    {
+      "id": "CP-0002",
+      "from_stage": "BRAND_PENDING",
+      "stage": "BRAND_APPROVED",
+      "status": "completed",
+      "captured_at": "2026-09-01T15:14:42Z",
+      "notes": "The current Brand Book hash is durably confirmed from the user brief."
+    },
+    {
+      "id": "CP-0003",
+      "from_stage": "BRAND_APPROVED",
+      "stage": "BASELINED",
+      "status": "completed",
+      "captured_at": "2026-09-01T15:14:42Z",
+      "notes": "Confirmed OpenUse product and visual constraints are the baseline for the implementation."
+    },
+    {
+      "id": "CP-0004",
+      "from_stage": "BASELINED",
+      "stage": "PLAN_PENDING",
+      "status": "completed",
+      "captured_at": "2026-09-01T15:14:42Z",
+      "notes": "The control-room information architecture and visual direction are ready for implementation."
+    },
+    {
+      "id": "CP-0005",
+      "from_stage": "PLAN_PENDING",
+      "stage": "BUILDING",
+      "status": "completed",
+      "captured_at": "2026-09-01T15:15:00Z",
+      "notes": "Implementation and verification are proceeding against the confirmed plan."
+    }
+  ],
+  "next_action": "Finish source and Windows verification gates before any release-candidate transition.",
+  "plan_hash": "61d5d3d9a857503fe331aac6dda2bf40d5f5b8d45889a2c0ebf1649e90f61980",
+  "plan_approval_status": "confirmed"
+}

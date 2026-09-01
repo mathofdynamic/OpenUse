@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.2.0",
+  "scores": {
+    "brand_fidelity": null,
+    "hierarchy": null,
+    "typography": null,
+    "spacing": null,
+    "responsive_behavior": null,
+    "interaction_states": null,
+    "motion": null,
+    "accessibility": null,
+    "performance": null,
+    "discoverability": null,
+    "robustness": null,
+    "evidence_coverage": null
+  },
+  "score_evidence": {},
+  "protocols": {},
+  "accepted_exceptions": []
+}

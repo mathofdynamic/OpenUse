@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.2.0",
+  "gates": {
+    "G0": "UNVERIFIED",
+    "G1": "UNVERIFIED",
+    "G2": "UNVERIFIED",
+    "G3": "UNVERIFIED",
+    "G4": "UNVERIFIED",
+    "G5": "UNVERIFIED",
+    "G6": "UNVERIFIED",
+    "G7": "UNVERIFIED",
+    "G8": "UNVERIFIED",
+    "G9": "UNVERIFIED"
+  },
+  "notes": {}
+}

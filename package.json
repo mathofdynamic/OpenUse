@@ -1,0 +1,28 @@
+{
+  "name": "openuse",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local-first, AI-agnostic Computer Use runtime for Windows.",
+  "packageManager": "pnpm@10.14.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @openuse/desktop dev",
+    "build": "pnpm --filter @openuse/desktop build",
+    "desktop:build": "pnpm --filter @openuse/desktop build",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "native:build": "dotnet publish native/windows/OpenUse.WindowsController.csproj -c Release -r win-x64 --self-contained false -o native/windows/publish",
+    "native:test": "dotnet test native/windows.tests/OpenUse.WindowsController.Tests.csproj",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^22.13.0",
+    "eslint": "^9.18.0",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.20.0"
+  }
+}

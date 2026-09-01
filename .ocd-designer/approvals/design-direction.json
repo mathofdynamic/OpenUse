@@ -1,0 +1,9 @@
+{
+  "schema_version": "0.2.0",
+  "status": "confirmed",
+  "scope": "design_direction_and_plan",
+  "plan_hash": "61d5d3d9a857503fe331aac6dda2bf40d5f5b8d45889a2c0ebf1649e90f61980",
+  "confirmed_by": "user implementation brief",
+  "confirmed_at": "2026-09-01T15:14:55Z",
+  "confirmation_evidence": "E-0002"
+}

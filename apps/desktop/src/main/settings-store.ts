@@ -1,0 +1,89 @@
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+import { defaultPermissionRecords, normalizeAppName } from "@openuse/permissions";
+import type { AppSettings, PermissionLevel, PermissionRecord, ProviderId } from "@openuse/shared";
+
+interface PersistedSettings {
+  version: 1;
+  provider: ProviderId;
+  modelId: string;
+  permissions: PermissionRecord[];
+}
+
+const defaultSettings = (): PersistedSettings => ({
+  version: 1,
+  provider: "vercel-gateway",
+  modelId: "openai/gpt-5.4",
+  permissions: defaultPermissionRecords(),
+});
+
+export class SettingsStore {
+  private value: PersistedSettings = defaultSettings();
+
+  constructor(private readonly filePath: string) {}
+
+  async initialize(): Promise<void> {
+    try {
+      const parsed = JSON.parse(await readFile(this.filePath, "utf8")) as Partial<PersistedSettings>;
+      const defaults = defaultSettings();
+      this.value = {
+        version: 1,
+        provider: parsed.provider === "vercel-gateway" ? parsed.provider : defaults.provider,
+        modelId: typeof parsed.modelId === "string" && parsed.modelId ? parsed.modelId : defaults.modelId,
+        permissions: Array.isArray(parsed.permissions) ? sanitizePermissions(parsed.permissions) : defaults.permissions,
+      };
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+      await this.persist();
+    }
+  }
+
+  get persisted(): PersistedSettings {
+    return {
+      ...this.value,
+      permissions: this.value.permissions.map((record) => ({ ...record })),
+    };
+  }
+
+  async setModel(modelId: string): Promise<void> {
+    this.value.modelId = modelId;
+    await this.persist();
+  }
+
+  async setPermission(appName: string, level: PermissionLevel): Promise<void> {
+    const normalized = normalizeAppName(appName);
+    const existing = this.value.permissions.find((record) => record.appName.toLowerCase() === normalized.toLowerCase());
+    const record = { appName: normalized, level, updatedAt: new Date().toISOString() };
+    if (existing) Object.assign(existing, record);
+    else this.value.permissions.push(record);
+    await this.persist();
+  }
+
+  publicSettings(apiKeyConfigured: boolean): AppSettings {
+    return {
+      provider: this.value.provider,
+      modelId: this.value.modelId,
+      apiKeyConfigured,
+      permissions: this.value.permissions.map((record) => ({ ...record })),
+    };
+  }
+
+  private async persist(): Promise<void> {
+    await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
+    const temporaryPath = `${this.filePath}.${process.pid}.tmp`;
+    await writeFile(temporaryPath, `${JSON.stringify(this.value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    await rename(temporaryPath, this.filePath);
+  }
+}
+
+function sanitizePermissions(records: PermissionRecord[]): PermissionRecord[] {
+  const valid = records.filter(
+    (record): record is PermissionRecord =>
+      Boolean(record) && typeof record.appName === "string" && ["ALLOW", "ASK", "DENY"].includes(record.level),
+  ).map((record) => ({
+    appName: normalizeAppName(record.appName),
+    level: record.level,
+    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString(),
+  }));
+  return valid.length > 0 ? valid : defaultPermissionRecords();
+}

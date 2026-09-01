@@ -1,0 +1,11 @@
+{
+  "schema_version": "0.2.0",
+  "status": "pending",
+  "scope": "accepted_release",
+  "source_fingerprint": null,
+  "candidate_hash": null,
+  "accepted_exceptions_hash": null,
+  "confirmed_by": null,
+  "confirmed_at": null,
+  "confirmation_evidence": null
+}

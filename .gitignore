@@ -1,0 +1,17 @@
+node_modules/
+dist/
+out/
+release/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+native/windows/bin/
+native/windows/obj/
+native/windows/publish/
+.DS_Store
+._*
+__MACOSX/
+.ocd-designer/runs/*/evidence/artifacts/*
+!.ocd-designer/runs/*/evidence/artifacts/.gitkeep

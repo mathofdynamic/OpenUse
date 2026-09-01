@@ -1,0 +1,10 @@
+{
+  "schema_version": "0.2.0",
+  "status": "confirmed",
+  "scope": "full_brand_book",
+  "version": "0.1.0",
+  "brand_hash": "eec8986e323a236e650b253d5f460849a5821003d57239bfe49a21091a602c90",
+  "confirmed_by": "user implementation brief",
+  "confirmed_at": "2026-09-01T15:14:30Z",
+  "confirmation_evidence": "E-0001"
+}
