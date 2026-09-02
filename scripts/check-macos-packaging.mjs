@@ -18,7 +18,7 @@ if (!existsSync(iconSource)) failures.push(`Missing exact icon source: ${iconSou
 if (!existsSync(builderConfig)) failures.push(`Missing electron-builder configuration: ${builderConfig}`);
 if (existsSync(builderConfig)) {
   const config = readFileSync(builderConfig, "utf8");
-  for (const required of ["com.openuse.app", "productName: OpenUse", "icon: OpenUse.icns", "OpenUseMacController"]) {
+  for (const required of ["com.openuse.app", "productName: OpenUse", "icon: OpenUse.icns", "OpenUseMacController", "to: MacOS/OpenUseMacController", "afterPack: ../../scripts/macOS-after-pack.mjs"]) {
     if (!config.includes(required)) failures.push(`Packaging configuration is missing: ${required}`);
   }
 }

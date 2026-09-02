@@ -4,12 +4,13 @@ asar: true
 directories:
   output: ../../dist/macos
   buildResources: .build/macos
+afterPack: ../../scripts/macOS-after-pack.mjs
 files:
   - dist/**/*
   - package.json
-extraResources:
+extraFiles:
   - from: ../../native/macos/.build/release/OpenUseMacController
-    to: native/macos/OpenUseMacController
+    to: MacOS/OpenUseMacController
 mac:
   target:
     - target: dir

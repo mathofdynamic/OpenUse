@@ -18,7 +18,7 @@ export function resolveNativeEnginePath(options: NativeProcessOptions, configure
   if (developmentOverride) return developmentOverride;
   if (options.platform === "darwin") {
     if (!options.isPackaged) return join(options.appPath, "..", "..", "native", "macos", ".build", "release", "OpenUseMacController");
-    return join(options.resourcesPath, "native", "macos", "OpenUseMacController");
+    return join(options.resourcesPath, "..", "MacOS", "OpenUseMacController");
   }
   if (options.platform === "win32") {
     if (!options.isPackaged) return join(options.appPath, "..", "..", "native", "windows", "publish", "OpenUse.WindowsController.exe");

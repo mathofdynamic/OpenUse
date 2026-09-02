@@ -46,8 +46,8 @@ function pathOptions(platform: "win32" | "darwin", isPackaged: boolean): NativeP
 }
 
 describe("native controller path resolution", () => {
-  it("resolves the embedded macOS controller from packaged resources", () => {
-    expect(resolveNativeEnginePath(pathOptions("darwin", true))).toBe("/Applications/OpenUse.app/Contents/Resources/native/macos/OpenUseMacController");
+  it("resolves the embedded macOS controller from the app executables directory", () => {
+    expect(resolveNativeEnginePath(pathOptions("darwin", true))).toBe("/Applications/OpenUse.app/Contents/MacOS/OpenUseMacController");
   });
 
   it("resolves the repository macOS controller during development", () => {
@@ -67,7 +67,7 @@ describe("native controller path resolution", () => {
     const saved = process.env.OPENUSE_NATIVE_ENGINE_PATH;
     process.env.OPENUSE_NATIVE_ENGINE_PATH = "/tmp/external-controller";
     try {
-      expect(resolveNativeEnginePath(pathOptions("darwin", true))).toBe("/Applications/OpenUse.app/Contents/Resources/native/macos/OpenUseMacController");
+      expect(resolveNativeEnginePath(pathOptions("darwin", true))).toBe("/Applications/OpenUse.app/Contents/MacOS/OpenUseMacController");
     } finally {
       if (saved === undefined) delete process.env.OPENUSE_NATIVE_ENGINE_PATH;
       else process.env.OPENUSE_NATIVE_ENGINE_PATH = saved;

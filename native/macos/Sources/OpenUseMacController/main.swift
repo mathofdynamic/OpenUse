@@ -430,13 +430,20 @@ private final class MacComputerController {
     }
 
     private func selfTest() -> [String: Any] {
-        let accessibility = AXIsProcessTrusted()
-        let screenPermission = CGPreflightScreenCaptureAccess()
+        // A bundled command-line helper is attributed to its containing app by
+        // TCC, but AXIsProcessTrusted/CGPreflightScreenCaptureAccess can still
+        // report the helper's own process preflight state. Probe the real
+        // operations as well so the app does not show a false negative after
+        // the user grants access to OpenUse.
+        let accessibilityPreflight = AXIsProcessTrusted()
+        let accessibility = accessibilityPreflight || accessibilityProbe()
         let monitors = monitorDiagnostics()
         let screenEnumeration = !monitors.isEmpty
         let windowEnumeration = !listWindows().isEmpty || screenEnumeration
         let screenshot = try? captureScreen(nil)
-        let screenshotAvailable = screenshot != nil && screenPermission
+        let screenPreflight = CGPreflightScreenCaptureAccess()
+        let screenshotAvailable = screenshot != nil
+        let screenPermission = screenPreflight || screenshotAvailable
         let inputAvailable = CGEventSource(stateID: .combinedSessionState) != nil
         var failures: [String] = []
         if !accessibility { failures.append("Accessibility permission") }
@@ -488,9 +495,6 @@ private final class MacComputerController {
         }
         guard captureBounds.width > 0, captureBounds.height > 0 else {
             throw NativeProtocolError(code: "STALE_UI_STATE", message: "The screen capture bounds are empty.")
-        }
-        guard CGPreflightScreenCaptureAccess() else {
-            throw NativeProtocolError(code: "SCREEN_RECORDING_PERMISSION_REQUIRED", message: "Screen Recording permission is required before OpenUse can capture the screen.")
         }
         let options: CGWindowImageOption = [.bestResolution, .boundsIgnoreFraming]
         let image = CGWindowListCreateImage(captureBounds, .optionOnScreenOnly, kCGNullWindowID, options)
@@ -574,9 +578,20 @@ private final class MacComputerController {
     }
 
     private func requireAccessibility() throws {
-        guard AXIsProcessTrusted() else {
+        guard accessibilityAvailable() else {
             throw NativeProtocolError(code: "ACCESSIBILITY_PERMISSION_REQUIRED", message: "Accessibility permission is required. Grant it to OpenUse in System Settings > Privacy & Security > Accessibility.")
         }
+    }
+
+    private func accessibilityAvailable() -> Bool {
+        AXIsProcessTrusted() || accessibilityProbe()
+    }
+
+    private func accessibilityProbe() -> Bool {
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedApplication: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedApplication)
+        return result == .success && focusedApplication != nil
     }
 
     private func focusElement(_ element: AXUIElement) throws {

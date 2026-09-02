@@ -16,8 +16,9 @@ pnpm dist:macos
 1. builds the Electron main process and renderer;
 2. builds `native/macos` in Swift release mode;
 3. generates `OpenUse.icns` from the exact `app-logo/logo.png` source;
-4. packages an arm64 `OpenUse.app` and DMG;
-5. audits the bundle ID, product name, and embedded controller path.
+4. applies a local ad-hoc signature to the app and embedded executables;
+5. packages an arm64 `OpenUse.app` and DMG;
+6. audits the bundle ID, product name, signature, and embedded controller path.
 
 The command fails before packaging if `app-logo/logo.png` is missing. It never substitutes a different image. Generated files are ignored by Git.
 
@@ -47,10 +48,10 @@ Architecture: arm64
 The Swift controller is copied into the app bundle as:
 
 ```text
-OpenUse.app/Contents/Resources/native/macos/OpenUseMacController
+OpenUse.app/Contents/MacOS/OpenUseMacController
 ```
 
-In development, Electron resolves `native/macos/.build/release/OpenUseMacController`. In a packaged app it resolves `process.resourcesPath/native/macos/OpenUseMacController`; no repository-relative path is used after installation. The packaged process ignores `OPENUSE_NATIVE_ENGINE_PATH`, which is a development/test override only. The controller remains a child process on private JSON-lines stdin/stdout and is shut down when OpenUse exits.
+In development, Electron resolves `native/macos/.build/release/OpenUseMacController`. In a packaged app it resolves the helper from `Contents/MacOS/OpenUseMacController` by resolving one level above `process.resourcesPath`; no repository-relative path is used after installation. The helper is placed in the standard macOS executable location so code-signing and privacy attribution can treat it as embedded executable code. The packaged process ignores `OPENUSE_NATIVE_ENGINE_PATH`, which is a development/test override only. The controller remains a child process on private JSON-lines stdin/stdout and is shut down when OpenUse exits.
 
 ## Icon
 
@@ -85,9 +86,9 @@ pnpm qualify:macos --development
 
 ## Signing state
 
-The current local configuration sets `identity: null`, disables automatic certificate discovery, and does not add a Developer ID signature. This is suitable for local qualification only; it is not public-distribution signing and does not provide notarization or Gatekeeper trust. Do not claim distribution readiness from this build.
+The current local configuration sets `identity: null`, disables automatic certificate discovery, and applies an ad-hoc signature in the `afterPack` hook. This is enough for local Apple Silicon execution of the embedded helper, but it is not public-distribution signing and does not provide notarization or Gatekeeper trust. Do not claim distribution readiness from this build. Because ad-hoc signatures have no Developer ID team identity, rebuilding the app can require macOS privacy permissions to be granted again.
 
-No custom entitlements are currently added. Accessibility and Screen Recording are macOS TCC permissions checked by the Swift controller; they are not granted by an Electron entitlement or a fake usage description. Future public releases should add a deliberate Developer ID signing, hardened-runtime, entitlements, notarization, and stapling configuration after testing the helper and parent bundle together.
+No custom entitlements are currently added. Accessibility and Screen Recording are macOS TCC permissions checked by the Swift controller; they are not granted by an Electron entitlement or a fake usage description. Future public releases should replace the local ad-hoc hook with deliberate Developer ID signing, hardened-runtime, entitlements, notarization, and stapling configuration after testing the helper and parent bundle together.
 
 ## Privacy permission identity
 

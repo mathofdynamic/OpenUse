@@ -123,10 +123,18 @@ function createWindow(): void {
       sandbox: true,
     },
   });
+  mainWindow.once("ready-to-show", () => focusMainWindow());
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) void mainWindow.loadURL(devUrl);
   else void mainWindow.loadFile(join(__dirname, "renderer", "index.html"));
   mainWindow.on("closed", () => { mainWindow = undefined; });
+}
+
+function focusMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.show();
+  mainWindow.focus();
+  if (process.platform === "darwin") app.focus({ steal: true });
 }
 
 async function bootstrap(): Promise<void> {
@@ -201,6 +209,11 @@ void bootstrap().catch((error) => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+app.on("activate", () => {
+  if (!mainWindow) createWindow();
+  else focusMainWindow();
 });
 
 app.on("before-quit", (event) => {

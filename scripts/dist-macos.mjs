@@ -1,5 +1,5 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join, resolve, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -28,7 +28,7 @@ if (!existsSync(iconSource)) {
 rmSync(outputDirectory, { recursive: true, force: true });
 mkdirSync(outputDirectory, { recursive: true });
 
-const packagingEnv = { ...process.env, COPYFILE_DISABLE: "1", CSC_IDENTITY_AUTO_DISCOVERY: "false" };
+const packagingEnv = { ...process.env, COPYFILE_DISABLE: "1", CSC_IDENTITY_AUTO_DISCOVERY: "false", OPENUSE_LOCAL_ADHOC_SIGN: "1" };
 delete packagingEnv.ELECTRON_RUN_AS_NODE;
 const stagingRoot = mkdtempSync(join(tmpdir(), "openuse-macos-package-"));
 const stagingDirectory = join(stagingRoot, "artifacts");
@@ -57,7 +57,7 @@ try {
   removeAppleDouble(outputDirectory);
 
   const infoPlist = join(appPath, "Contents", "Info.plist");
-  const bundledController = join(appPath, "Contents", "Resources", "native", "macos", "OpenUseMacController");
+  const bundledController = join(appPath, "Contents", "MacOS", "OpenUseMacController");
   if (!existsSync(infoPlist)) throw new Error(`Packaged Info.plist is missing: ${infoPlist}`);
   if (!existsSync(bundledController)) throw new Error(`Packaged Swift controller is missing: ${bundledController}`);
   const bundleId = readPlistValue(infoPlist, "CFBundleIdentifier");
@@ -74,7 +74,11 @@ try {
   console.log(`Icon ............. ${iconFile}`);
   console.log(`Icon source ...... ${iconSource}`);
   console.log(`Embedded engine .. ${bundledController}`);
-  console.log("Signing .......... unsigned local build (Developer ID/notarization not configured)");
+  const signature = describeSignature(appPath);
+  const helperSignature = describeSignature(bundledController);
+  if (!signature.includes("Identifier=com.openuse.app") || !signature.includes("Signature=adhoc")) throw new Error("The local app signature was not applied.");
+  if (!helperSignature.includes("Signature=adhoc")) throw new Error("The local helper signature was not applied.");
+  console.log("Signing .......... local ad-hoc signature (Developer ID/notarization not configured)");
 } finally {
   rmSync(stagingRoot, { recursive: true, force: true });
 }
@@ -114,4 +118,9 @@ function readPlistValue(infoPlist, key) {
   } catch {
     return undefined;
   }
+}
+
+function describeSignature(path) {
+  const result = spawnSync("codesign", ["-dvvv", path], { encoding: "utf8" });
+  return `${result.stdout ?? ""}${result.stderr ?? ""}`;
 }
