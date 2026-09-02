@@ -15,6 +15,6 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="3.0.0" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../native/windows/OpenUse.WindowsController.csproj" />
+    <ProjectReference Include="../windows/OpenUse.WindowsController.csproj" />
   </ItemGroup>
 </Project>

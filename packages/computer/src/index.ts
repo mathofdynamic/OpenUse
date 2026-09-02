@@ -115,7 +115,10 @@ export class MockComputerController implements ComputerController {
       id: "mock-notepad-window",
       title: "Untitled - Notepad",
       app: "Notepad",
+      appIdentity: "notepad",
       processName: "notepad",
+      processId: 1001,
+      className: "Notepad",
       bounds: { x: 80, y: 80, width: 920, height: 680 },
       focused: true,
     };
@@ -125,12 +128,15 @@ export class MockComputerController implements ComputerController {
       elements: [
         {
           id: "el_1",
+          parentId: undefined,
           role: "Edit",
           name: "Text editor",
           automationId: "TextEditor",
+          className: "RichEditD2DPT",
           bounds: { x: 120, y: 150, width: 820, height: 560 },
           enabled: true,
           offscreen: false,
+          supportedPatterns: ["Value", "Text"],
         },
       ],
     };
@@ -157,7 +163,7 @@ export class MockComputerController implements ComputerController {
   async listApps(signal?: AbortSignal) {
     this.check(signal);
     this.record("listApps", {});
-    return { apps: [{ id: "mock-notepad", name: "Notepad", processName: "notepad" }] };
+    return { apps: [{ id: "mock-notepad", name: "Notepad", processName: "notepad", processId: 1001, appIdentity: "notepad" }] };
   }
 
   async listWindows(signal?: AbortSignal) {
@@ -177,7 +183,16 @@ export class MockComputerController implements ComputerController {
   async captureScreen(windowId?: string, signal?: AbortSignal) {
     this.check(signal);
     this.record("captureScreen", { windowId });
-    return { data: "", mimeType: "image/png" as const, width: 1, height: 1, source: "screen" as const };
+    return {
+      data: "",
+      mimeType: "image/png" as const,
+      width: 1,
+      height: 1,
+      source: "screen" as const,
+      coordinateSystem: "virtual-screen-physical-pixels" as const,
+      dpi: 96,
+      captureBounds: { x: 0, y: 0, width: 1, height: 1 },
+    };
   }
 
   async launchApp(app: string, args?: string[], signal?: AbortSignal) {

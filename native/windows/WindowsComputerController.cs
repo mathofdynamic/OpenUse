@@ -2,8 +2,10 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows.Automation;
 
@@ -13,6 +15,7 @@ public sealed class WindowsComputerController
 {
     private const int MaxInspectionElements = 360;
     private const int MaxInspectionDepth = 6;
+    private const int MaxObservationBytes = 120_000;
     private const int MaxCaptureWidth = 1440;
     private const int SwRestore = 9;
     private const uint MouseEventLeftDown = 0x0002;
@@ -26,8 +29,21 @@ public sealed class WindowsComputerController
     private const uint KeyEventUnicode = 0x0004;
     private const uint InputKeyboard = 1;
 
-    public Task<object> DispatchAsync(string method, System.Text.Json.JsonElement parameters)
+    private static readonly (AutomationPattern Pattern, string Name)[] PatternDefinitions =
     {
+        (InvokePattern.Pattern, "Invoke"),
+        (ValuePattern.Pattern, "Value"),
+        (TextPattern.Pattern, "Text"),
+        (SelectionItemPattern.Pattern, "SelectionItem"),
+        (TogglePattern.Pattern, "Toggle"),
+        (ExpandCollapsePattern.Pattern, "ExpandCollapse"),
+        (ScrollItemPattern.Pattern, "ScrollItem"),
+        (RangeValuePattern.Pattern, "RangeValue"),
+    };
+
+    public Task<object> DispatchAsync(string method, System.Text.Json.JsonElement parameters, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         return method switch
         {
             "listApps" => Task.FromResult<object>(ListApps()),
@@ -38,27 +54,30 @@ public sealed class WindowsComputerController
             "focusWindow" => Task.FromResult<object>(FocusWindow(Protocol.ReadParams<FocusWindowParams>(parameters).WindowId)),
             "click" => Task.FromResult<object>(Click(Protocol.ReadParams<ClickParams>(parameters))),
             "clickElement" => Task.FromResult<object>(ClickElement(Protocol.ReadParams<ClickElementParams>(parameters))),
-            "doubleClick" => Task.FromResult<object>(DoubleClick(Protocol.ReadParams<DoubleClickParams>(parameters))),
-            "typeText" => Task.FromResult<object>(TypeText(Protocol.ReadParams<TypeTextParams>(parameters))),
+            "doubleClick" => Task.FromResult<object>(DoubleClick(Protocol.ReadParams<DoubleClickParams>(parameters), cancellationToken)),
+            "typeText" => Task.FromResult<object>(TypeText(Protocol.ReadParams<TypeTextParams>(parameters), cancellationToken)),
             "pressKey" => Task.FromResult<object>(PressKey(Protocol.ReadParams<PressKeyParams>(parameters))),
             "scroll" => Task.FromResult<object>(Scroll(Protocol.ReadParams<ScrollParams>(parameters))),
-            "wait" => WaitAsync(Protocol.ReadParams<WaitParams>(parameters).Milliseconds),
+            "wait" => WaitAsync(Protocol.ReadParams<WaitParams>(parameters).Milliseconds, cancellationToken),
             _ => throw new NativeControllerException("UNSUPPORTED_ACTION", $"Unknown native method: {method}"),
         };
     }
 
     private static object ListApps()
     {
-        var apps = new Dictionary<string, AppInfo>(StringComparer.OrdinalIgnoreCase);
+        var apps = new Dictionary<int, AppInfo>();
         foreach (var process in Process.GetProcesses())
         {
             try
             {
                 if (process.MainWindowHandle == IntPtr.Zero || string.IsNullOrWhiteSpace(process.MainWindowTitle)) continue;
                 var processName = process.ProcessName;
-                var name = FriendlyProcessName(process, processName);
+                var title = process.MainWindowTitle;
+                var name = processName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase)
+                    ? PackagedApplicationName(title)
+                    : FriendlyProcessName(process, processName);
                 var id = process.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                apps[processName] = new AppInfo(id, name, processName);
+                apps[process.Id] = new AppInfo(id, name, processName, process.Id, StableAppIdentity(processName, string.Empty, name, process.Id));
             }
             catch
             {
@@ -115,7 +134,7 @@ public sealed class WindowsComputerController
         var sequence = 0;
         var truncated = false;
 
-        void Visit(AutomationElement element, int depth)
+        void Visit(AutomationElement element, int depth, string? parentId)
         {
             if (depth > MaxInspectionDepth || elements.Count >= MaxInspectionElements)
             {
@@ -123,21 +142,37 @@ public sealed class WindowsComputerController
                 return;
             }
             sequence += 1;
-            var control = ReadElement(element, $"el_{sequence}");
-            if (control is not null) elements.Add(control);
+            var id = StableElementId(element, sequence);
+            var control = ReadElement(element, id, parentId);
+            var nextParentId = parentId;
+            if (control is not null)
+            {
+                elements.Add(control);
+                nextParentId = control.Id;
+            }
             AutomationElement? child;
             try { child = walker.GetFirstChild(element); }
             catch { return; }
             while (child is not null)
             {
-                Visit(child, depth + 1);
+                Visit(child, depth + 1, nextParentId);
                 if (elements.Count >= MaxInspectionElements) { truncated = true; return; }
                 try { child = walker.GetNextSibling(child); }
                 catch { return; }
             }
         }
 
-        Visit(root, 0);
+        Visit(root, 0, null);
+        elements = elements
+            .OrderByDescending(IsActionable)
+            .ThenBy(element => element.ParentId is null ? 0 : 1)
+            .ThenBy(element => element.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        while (elements.Count > 1 && ObservationSize(window, elements, truncated) > MaxObservationBytes)
+        {
+            elements.RemoveAt(elements.Count - 1);
+            truncated = true;
+        }
         return new WindowInspection(window, elements, truncated);
     }
 
@@ -153,7 +188,10 @@ public sealed class WindowsComputerController
             throw new NativeControllerException("UNSUPPORTED_ACTION", "Shells, installers, and scripting hosts are disabled in OpenUse.");
         try
         {
-            var startInfo = new ProcessStartInfo { FileName = executable, UseShellExecute = true };
+            // CreateProcess-style launch avoids URI/file associations and shell
+            // handlers. The tool surface is for executables, not command
+            // interpreters or arbitrary shell actions.
+            var startInfo = new ProcessStartInfo { FileName = executable, UseShellExecute = false };
             if (input.Arguments is not null)
             {
                 foreach (var argument in input.Arguments) startInfo.ArgumentList.Add(argument);
@@ -196,13 +234,33 @@ public sealed class WindowsComputerController
 
     private static OperationResult ClickElement(ClickElementParams input)
     {
-        if (string.IsNullOrWhiteSpace(input.WindowId) || input.ElementId is null && input.Role is null && input.Name is null && input.AutomationId is null)
+        try
+        {
+            return ClickElementCore(input);
+        }
+        catch (ElementNotAvailableException)
+        {
+            throw new NativeControllerException("STALE_UI_STATE", "The semantic control disappeared before it could be activated.");
+        }
+        catch (InvalidOperationException)
+        {
+            throw new NativeControllerException("STALE_UI_STATE", "The semantic control could not be activated in its current state.");
+        }
+    }
+
+    private static OperationResult ClickElementCore(ClickElementParams input)
+    {
+        if (string.IsNullOrWhiteSpace(input.WindowId) || input.ElementId is null && input.Role is null && input.Name is null && input.AutomationId is null && input.ClassName is null)
             throw new NativeControllerException("INVALID_TOOL_INPUT", "A semantic element selector is required.");
         var windowHandle = ParseWindowHandle(input.WindowId);
         var window = ReadWindow(windowHandle, GetForegroundWindow());
-        var element = FindElement(windowHandle, input.ElementId, input.Role, input.Name, input.AutomationId);
+        ShowWindow(windowHandle, SwRestore);
+        if (!SetForegroundWindow(windowHandle)) throw new NativeControllerException("STALE_UI_STATE", "Could not focus the target window before clicking.");
+        var element = FindElement(windowHandle, input.ElementId, input.Role, input.Name, input.AutomationId, input.ClassName);
         if (!element.Current.IsEnabled || element.Current.IsOffscreen)
             throw new NativeControllerException("STALE_UI_STATE", "The semantic control is disabled or offscreen.");
+        if (ElementBounds(element).Width <= 0 || ElementBounds(element).Height <= 0)
+            throw new NativeControllerException("STALE_UI_STATE", "The semantic control no longer has usable bounds.");
         try { element.SetFocus(); } catch { /* Some controls cannot receive focus. */ }
         if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
         {
@@ -226,45 +284,74 @@ public sealed class WindowsComputerController
         return new OperationResult(true, true, window, $"Clicked {ElementLabel(element)} by its bounds.");
     }
 
-    private static OperationResult DoubleClick(DoubleClickParams input)
+    private static OperationResult DoubleClick(DoubleClickParams input, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         ValidateCoordinates(input.X, input.Y);
         MoveCursor(input.X, input.Y);
         mouse_event(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
         mouse_event(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
-        Thread.Sleep(55);
+        if (cancellationToken.WaitHandle.WaitOne(55)) throw new OperationCanceledException(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         mouse_event(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
         mouse_event(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
         return new OperationResult(true, true, null, "Double-clicked the requested position.");
     }
 
-    private static OperationResult TypeText(TypeTextParams input)
+    private static OperationResult TypeText(TypeTextParams input, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrEmpty(input.Text) || input.Text.Length > 20000)
             throw new NativeControllerException("INVALID_TOOL_INPUT", "Text must contain between 1 and 20000 characters.");
         if (input.WindowId is not null)
         {
             var handle = ParseWindowHandle(input.WindowId);
             ShowWindow(handle, SwRestore);
-            SetForegroundWindow(handle);
+            if (!SetForegroundWindow(handle)) throw new NativeControllerException("STALE_UI_STATE", "Could not focus the target window before typing.");
         }
-        if (input.WindowId is not null && (input.ElementId is not null || input.Role is not null || input.Name is not null))
+        AutomationElement? target = null;
+        if (input.WindowId is not null && (input.ElementId is not null || input.Role is not null || input.Name is not null || input.AutomationId is not null || input.ClassName is not null))
         {
-            var element = FindElement(ParseWindowHandle(input.WindowId), input.ElementId, input.Role, input.Name, null);
-            try { element.SetFocus(); } catch { }
+            target = FindElement(ParseWindowHandle(input.WindowId), input.ElementId, input.Role, input.Name, input.AutomationId, input.ClassName);
+            try { target.SetFocus(); }
+            catch (ElementNotAvailableException) { throw new NativeControllerException("STALE_UI_STATE", "The target text control disappeared before typing."); }
+            catch (InvalidOperationException) { throw new NativeControllerException("STALE_UI_STATE", "The target text control could not receive focus."); }
         }
-        EnsureFocusedElementIsNotCredentialField();
-        SendUnicodeText(input.Text);
+        EnsureNotCredentialElement(target);
+        AutomationElement? focused = null;
+        try { focused = AutomationElement.FocusedElement; } catch { }
+        EnsureNotCredentialElement(focused);
+        if (target is not null && TrySetValue(target, input.Text))
+            return new OperationResult(true, true, null, $"Set {input.Text.Length} characters through UI Automation.");
+        if (target is null && focused is not null && TrySetValue(focused, input.Text))
+            return new OperationResult(true, true, null, $"Set {input.Text.Length} characters through UI Automation.");
+        SendUnicodeText(input.Text, cancellationToken);
         return new OperationResult(true, true, null, $"Typed {input.Text.Length} characters.");
     }
 
-    private static void EnsureFocusedElementIsNotCredentialField()
+    private static bool TrySetValue(AutomationElement element, string text)
     {
         try
         {
-            var focused = AutomationElement.FocusedElement;
-            var role = RoleFor(focused.Current.ControlType);
-            var name = focused.Current.Name ?? string.Empty;
+            if (!element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern)) return false;
+            var value = (ValuePattern)pattern;
+            if (value.Current.IsReadOnly) return false;
+            value.SetValue(text);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void EnsureNotCredentialElement(AutomationElement? element)
+    {
+        if (element is null) return;
+        try
+        {
+            var role = RoleFor(element.Current.ControlType);
+            var name = element.Current.Name ?? string.Empty;
             if (CredentialWords.IsMatch($"{role} {name}"))
                 throw new NativeControllerException("CREDENTIAL_INTERACTION_DISABLED", "Credential and password entry is disabled in OpenUse.");
         }
@@ -274,8 +361,8 @@ public sealed class WindowsComputerController
         }
         catch
         {
-            // Some native controls do not expose a focused UIA element. The
-            // agent has already applied its target checks; keep typing usable.
+            // A few legacy controls can disappear while their properties are
+            // read. The agent still performs its target checks before typing.
         }
     }
 
@@ -297,11 +384,12 @@ public sealed class WindowsComputerController
         return new OperationResult(true, true, null, $"Scrolled {input.Amount} units.");
     }
 
-    private static async Task<object> WaitAsync(int milliseconds)
+    private static Task<object> WaitAsync(int milliseconds, CancellationToken cancellationToken)
     {
         if (milliseconds is < 50 or > 10000) throw new NativeControllerException("INVALID_TOOL_INPUT", "Wait must be between 50ms and 10000ms.");
-        await Task.Delay(milliseconds);
-        return new { ok = true, waitedMs = milliseconds };
+        cancellationToken.ThrowIfCancellationRequested();
+        if (cancellationToken.WaitHandle.WaitOne(milliseconds)) throw new OperationCanceledException(cancellationToken);
+        return Task.FromResult<object>(new { ok = true, waitedMs = milliseconds });
     }
 
     private static Screenshot CaptureScreen(string? windowId)
@@ -311,15 +399,18 @@ public sealed class WindowsComputerController
         int width;
         int height;
         var source = "screen";
+        var dpi = (int)GetDpiForSystem();
         if (windowId is not null)
         {
+            var handle = ParseWindowHandle(windowId);
             var rectangle = new RECT();
-            if (!GetWindowRect(ParseWindowHandle(windowId), out rectangle)) throw new NativeControllerException("WINDOW_NOT_FOUND", "Could not read the target window bounds.");
+            if (!GetWindowRect(handle, out rectangle)) throw new NativeControllerException("WINDOW_NOT_FOUND", "Could not read the target window bounds.");
             x = rectangle.Left;
             y = rectangle.Top;
             width = rectangle.Right - rectangle.Left;
             height = rectangle.Bottom - rectangle.Top;
             source = "window";
+            dpi = (int)GetDpiForWindow(handle);
         }
         else
         {
@@ -338,7 +429,15 @@ public sealed class WindowsComputerController
         using var resized = ResizeForModel(original);
         using var output = new MemoryStream();
         resized.Save(output, ImageFormat.Png);
-        return new Screenshot(Convert.ToBase64String(output.ToArray()), "image/png", resized.Width, resized.Height, source);
+        return new Screenshot(
+            Convert.ToBase64String(output.ToArray()),
+            "image/png",
+            resized.Width,
+            resized.Height,
+            source,
+            "virtual-screen-physical-pixels",
+            dpi <= 0 ? 96 : dpi,
+            new Bounds(x, y, width, height));
     }
 
     private static Bitmap ResizeForModel(Bitmap source)
@@ -354,7 +453,7 @@ public sealed class WindowsComputerController
         return resized;
     }
 
-    private static AutomationElement FindElement(IntPtr windowHandle, string? elementId, string? role, string? name, string? automationId)
+    private static AutomationElement FindElement(IntPtr windowHandle, string? elementId, string? role, string? name, string? automationId, string? className)
     {
         AutomationElement root;
         try { root = AutomationElement.FromHandle(windowHandle); }
@@ -367,8 +466,8 @@ public sealed class WindowsComputerController
         {
             if (found is not null || depth > MaxInspectionDepth) return;
             sequence += 1;
-            var currentId = $"el_{sequence}";
-            if (Matches(element, currentId, elementId, role, name, automationId)) { found = element; return; }
+            var currentId = StableElementId(element, sequence);
+            if (Matches(element, currentId, elementId, role, name, automationId, className)) { found = element; return; }
             AutomationElement? child;
             try { child = walker.GetFirstChild(element); } catch { return; }
             while (child is not null && found is null)
@@ -381,39 +480,112 @@ public sealed class WindowsComputerController
         return found ?? throw new NativeControllerException("ELEMENT_NOT_FOUND", "No matching semantic UI element was found. Inspect the window again.");
     }
 
-    private static bool Matches(AutomationElement element, string currentId, string? wantedId, string? wantedRole, string? wantedName, string? wantedAutomationId)
+    private static bool Matches(AutomationElement element, string currentId, string? wantedId, string? wantedRole, string? wantedName, string? wantedAutomationId, string? wantedClassName)
     {
         try
         {
             var role = RoleFor(element.Current.ControlType);
             var currentName = element.Current.Name ?? string.Empty;
             var currentAutomationId = element.Current.AutomationId ?? string.Empty;
-            if (wantedId is not null && currentId.Equals(wantedId, StringComparison.OrdinalIgnoreCase)) return true;
+            var currentClassName = element.Current.ClassName ?? string.Empty;
+            if (wantedId is not null && !currentId.Equals(wantedId, StringComparison.OrdinalIgnoreCase)) return false;
             if (wantedAutomationId is not null && !currentAutomationId.Equals(wantedAutomationId, StringComparison.OrdinalIgnoreCase)) return false;
             if (wantedRole is not null && !role.Equals(wantedRole, StringComparison.OrdinalIgnoreCase)) return false;
             if (wantedName is not null && !currentName.Equals(wantedName, StringComparison.OrdinalIgnoreCase)) return false;
-            return wantedId is null && (wantedRole is not null || wantedName is not null || wantedAutomationId is not null);
+            if (wantedClassName is not null && !currentClassName.Equals(wantedClassName, StringComparison.OrdinalIgnoreCase)) return false;
+            return wantedId is not null || wantedRole is not null || wantedName is not null || wantedAutomationId is not null || wantedClassName is not null;
         }
         catch { return false; }
     }
 
-    private static UiElement? ReadElement(AutomationElement element, string id)
+    private static UiElement? ReadElement(AutomationElement element, string id, string? parentId)
     {
         try
         {
             var role = RoleFor(element.Current.ControlType);
             var name = element.Current.Name ?? string.Empty;
             var automationId = element.Current.AutomationId;
+            var className = element.Current.ClassName ?? string.Empty;
             var bounds = ElementBounds(element);
             var enabled = element.Current.IsEnabled;
             var offscreen = element.Current.IsOffscreen;
-            var actionable = new[] { "Button", "CheckBox", "ComboBox", "Edit", "Hyperlink", "ListItem", "MenuItem", "RadioButton", "TabItem", "Text", "TreeItem", "Slider", "Spinner" }.Contains(role, StringComparer.OrdinalIgnoreCase);
-            if (string.IsNullOrWhiteSpace(name) && !actionable) return null;
+            var actionable = new[] { "Button", "CheckBox", "ComboBox", "Document", "Edit", "Hyperlink", "ListItem", "MenuItem", "RadioButton", "TabItem", "Text", "TreeItem", "Slider", "Spinner" }.Contains(role, StringComparer.OrdinalIgnoreCase);
+            if (offscreen || string.IsNullOrWhiteSpace(name) && !actionable) return null;
             if (bounds.Width <= 0 || bounds.Height <= 0) return null;
-            return new UiElement(id, role, name, string.IsNullOrWhiteSpace(automationId) ? null : automationId, bounds, enabled, offscreen);
+            return new UiElement(
+                id,
+                parentId,
+                role,
+                TrimObservation(name),
+                string.IsNullOrWhiteSpace(automationId) ? null : TrimObservation(automationId),
+                TrimObservation(className),
+                bounds,
+                enabled,
+                offscreen,
+                SupportedPatterns(element),
+                ReadElementValue(element, role, name));
         }
         catch { return null; }
     }
+
+    private static string StableElementId(AutomationElement element, int fallback)
+    {
+        try
+        {
+            var runtimeId = element.GetRuntimeId();
+            if (runtimeId is { Length: > 0 }) return $"el_{string.Join("_", runtimeId)}";
+        }
+        catch { }
+        return $"el_{fallback}";
+    }
+
+    private static string[] SupportedPatterns(AutomationElement element)
+    {
+        var patterns = new List<string>();
+        foreach (var definition in PatternDefinitions)
+        {
+            try
+            {
+                if (element.TryGetCurrentPattern(definition.Pattern, out _)) patterns.Add(definition.Name);
+            }
+            catch { }
+        }
+        return patterns.ToArray();
+    }
+
+    private static bool IsActionable(UiElement element) =>
+        element.SupportedPatterns.Count > 0 || element.Role is "Button" or "CheckBox" or "ComboBox" or "Document" or "Edit" or "Hyperlink" or "ListItem" or "MenuItem" or "RadioButton" or "TabItem" or "TreeItem" or "Slider" or "Spinner";
+
+    private static string? ReadElementValue(AutomationElement element, string role, string name)
+    {
+        if (CredentialWords.IsMatch($"{role} {name}")) return null;
+        if (role is not ("Document" or "Edit" or "Text" or "ComboBox" or "ListItem" or "Window")) return null;
+        try
+        {
+            if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var valuePattern))
+            {
+                var value = ((ValuePattern)valuePattern).Current.Value;
+                return string.IsNullOrWhiteSpace(value) ? null : TrimObservation(value);
+            }
+            if (element.TryGetCurrentPattern(TextPattern.Pattern, out var textPattern))
+            {
+                var text = ((TextPattern)textPattern).DocumentRange.GetText(1000).TrimEnd('\r', '\n');
+                return string.IsNullOrWhiteSpace(text) ? null : TrimObservation(text);
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private static string TrimObservation(string value)
+    {
+        const int maxLength = 512;
+        var normalized = value.Replace("\0", string.Empty, StringComparison.Ordinal);
+        return normalized.Length <= maxLength ? normalized : $"{normalized[..maxLength]}…";
+    }
+
+    private static int ObservationSize(WindowInfo window, IReadOnlyList<UiElement> elements, bool truncated) =>
+        JsonSerializer.SerializeToUtf8Bytes(new WindowInspection(window, elements, truncated), Protocol.JsonOptions).Length;
 
     private static Bounds ElementBounds(AutomationElement element)
     {
@@ -480,12 +652,17 @@ public sealed class WindowsComputerController
         if (!GetWindowRect(handle, out var rectangle)) throw new NativeControllerException("WINDOW_NOT_FOUND", "Could not read the target window bounds.");
         var title = ReadWindowTitle(handle);
         var app = FriendlyProcessName(processName);
-        if (processName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(title)) app = title;
+        if (processName.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(title)) app = PackagedApplicationName(title);
+        var className = ReadClassName(handle);
+        var appIdentity = StableAppIdentity(processName, className, app, (int)processId);
         return new WindowInfo(
             handle.ToInt64().ToString(System.Globalization.CultureInfo.InvariantCulture),
             title,
             app,
+            appIdentity,
             processName,
+            (int)processId,
+            className,
             new Bounds(rectangle.Left, rectangle.Top, rectangle.Right - rectangle.Left, rectangle.Bottom - rectangle.Top),
             handle == focused);
     }
@@ -507,8 +684,44 @@ public sealed class WindowsComputerController
         return builder.ToString();
     }
 
+    private static string ReadClassName(IntPtr handle)
+    {
+        var builder = new StringBuilder(256);
+        return GetClassName(handle, builder, builder.Capacity) > 0 ? builder.ToString() : string.Empty;
+    }
+
+    private static string StableAppIdentity(string processName, string className, string displayName, int? processId = null)
+    {
+        var process = string.IsNullOrWhiteSpace(processName) ? "unknown" : processName.Trim().ToLowerInvariant();
+        var windowClass = string.IsNullOrWhiteSpace(className) ? "unknown" : className.Trim().ToLowerInvariant();
+        if (!process.Equals("applicationframehost", StringComparison.OrdinalIgnoreCase) && processId.HasValue)
+        {
+            var aumid = ReadApplicationUserModelId(processId.Value);
+            if (!string.IsNullOrWhiteSpace(aumid)) return $"aumid:{aumid.Trim().ToLowerInvariant()}";
+        }
+        if (process.Equals("applicationframehost", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(displayName))
+            return $"packaged:{displayName.Trim().ToLowerInvariant()}";
+        return $"win32:{process}:{windowClass}";
+    }
+
+    private static string? ReadApplicationUserModelId(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            var length = 0u;
+            var result = GetApplicationUserModelId(process.Handle, ref length, null);
+            if (result != ErrorInsufficientBuffer || length == 0) return null;
+            var buffer = new StringBuilder((int)length);
+            return GetApplicationUserModelId(process.Handle, ref length, buffer) == 0 ? buffer.ToString() : null;
+        }
+        catch { return null; }
+    }
+
     private static string FriendlyProcessName(Process process, string fallback)
     {
+        var knownName = FriendlyProcessName(fallback);
+        if (!knownName.Equals(fallback, StringComparison.Ordinal)) return knownName;
         try
         {
             var fileName = process.MainModule?.FileName;
@@ -532,6 +745,12 @@ public sealed class WindowsComputerController
             "chrome" => "Chrome",
             _ => processName,
         };
+    }
+
+    private static string PackagedApplicationName(string title)
+    {
+        var separator = title.LastIndexOf(" - ", StringComparison.Ordinal);
+        return separator >= 0 && separator + 3 < title.Length ? title[(separator + 3)..].Trim() : title.Trim();
     }
 
     private static string ResolveApplication(string app)
@@ -558,6 +777,7 @@ public sealed class WindowsComputerController
     }
 
     private static readonly Regex CredentialWords = new(@"\b(password|passcode|credential|secret|security code|one[- ]time code|otp)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private const int ErrorInsufficientBuffer = 122;
 
     private static void MoveCursor(int x, int y)
     {
@@ -570,11 +790,12 @@ public sealed class WindowsComputerController
             throw new NativeControllerException("INVALID_TOOL_INPUT", "Screen coordinates are outside the allowed bounds.");
     }
 
-    private static void SendUnicodeText(string text)
+    private static void SendUnicodeText(string text, CancellationToken cancellationToken)
     {
         var inputs = new List<INPUT>(text.Length * 2);
         foreach (var character in text)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             inputs.Add(KeyboardInput(0, character, KeyEventUnicode));
             inputs.Add(KeyboardInput(0, character, KeyEventUnicode | KeyEventKeyUp));
         }
@@ -588,11 +809,6 @@ public sealed class WindowsComputerController
         var modifiers = new List<ushort>();
         for (var index = 0; index < parts.Length - 1; index += 1) modifiers.Add(Modifier(parts[index]));
         var main = parts[^1];
-        if (modifiers.Count == 0 && main.Length > 1 && !VirtualKeyNames.ContainsKey(main.ToUpperInvariant()))
-        {
-            SendUnicodeText(main);
-            return;
-        }
         var key = VirtualKey(main);
         var inputs = new List<INPUT>();
         foreach (var modifier in modifiers) inputs.Add(KeyboardInput(modifier, 0, 0));
@@ -609,6 +825,8 @@ public sealed class WindowsComputerController
         ["SPACE"] = 0x20, ["UP"] = 0x26, ["ARROWUP"] = 0x26, ["DOWN"] = 0x28, ["ARROWDOWN"] = 0x28,
         ["LEFT"] = 0x25, ["ARROWLEFT"] = 0x25, ["RIGHT"] = 0x27, ["ARROWRIGHT"] = 0x27,
         ["HOME"] = 0x24, ["END"] = 0x23, ["PAGEUP"] = 0x21, ["PAGEDOWN"] = 0x22,
+        ["PLUS"] = 0xBB, ["ADD"] = 0x6B, ["MINUS"] = 0xBD, ["SUBTRACT"] = 0x6D,
+        ["DECIMAL"] = 0x6E, ["MULTIPLY"] = 0x6A, ["DIVIDE"] = 0x6F,
         ["INSERT"] = 0x2D, ["F1"] = 0x70, ["F2"] = 0x71, ["F3"] = 0x72, ["F4"] = 0x73,
         ["F5"] = 0x74, ["F6"] = 0x75, ["F7"] = 0x76, ["F8"] = 0x77, ["F9"] = 0x78,
         ["F10"] = 0x79, ["F11"] = 0x7A, ["F12"] = 0x7B,
@@ -631,12 +849,12 @@ public sealed class WindowsComputerController
         throw new NativeControllerException("INVALID_TOOL_INPUT", $"Unknown key: {value}");
     }
 
-    private static INPUT KeyboardInput(ushort virtualKey, char unicode, uint flags)
+    private static INPUT KeyboardInput(ushort virtualKey, ushort scanCode, uint flags)
     {
         return new INPUT
         {
             Type = InputKeyboard,
-            Data = new InputUnion { Keyboard = new KEYBDINPUT { VirtualKey = virtualKey, ScanCode = unicode, Flags = flags } },
+            Data = new InputUnion { Keyboard = new KEYBDINPUT { VirtualKey = virtualKey, ScanCode = scanCode, Flags = flags } },
         };
     }
 
@@ -677,8 +895,12 @@ public sealed class WindowsComputerController
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr handle, StringBuilder text, int maxCount);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowTextLength(IntPtr handle);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr handle, StringBuilder className, int maxCount);
     [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] private static extern void mouse_event(uint flags, int x, int y, uint data, UIntPtr extraInfo);
     [DllImport("user32.dll")] private static extern uint SendInput(uint count, INPUT[] inputs, int size);
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr handle);
+    [DllImport("user32.dll")] private static extern uint GetDpiForSystem();
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern int GetApplicationUserModelId(IntPtr processHandle, ref uint applicationUserModelIdLength, StringBuilder? applicationUserModelId);
 }

@@ -25,11 +25,11 @@ describe("computer controllers", () => {
     });
 
     await controller.launchApp("Notepad", ["--test"]);
-    await controller.clickElement({ windowId: "window-1", role: "Button", name: "Save" });
+    await controller.clickElement({ windowId: "window-1", role: "Button", name: "Save", className: "Button" });
 
     expect(calls).toEqual([
       { method: "launchApp", params: { app: "Notepad", arguments: ["--test"] } },
-      { method: "clickElement", params: { windowId: "window-1", role: "Button", name: "Save" } },
+      { method: "clickElement", params: { windowId: "window-1", role: "Button", name: "Save", className: "Button" } },
     ]);
   });
 });

@@ -10,6 +10,8 @@ coverage/
 native/windows/bin/
 native/windows/obj/
 native/windows/publish/
+native/windows.tests/bin/
+native/windows.tests/obj/
 .DS_Store
 ._*
 __MACOSX/

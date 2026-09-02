@@ -20,22 +20,43 @@ public sealed class NativeControllerException(string code, string message) : Exc
 
 public sealed record Bounds(int X, int Y, int Width, int Height);
 
-public sealed record AppInfo(string Id, string Name, string ProcessName);
+public sealed record AppInfo(string Id, string Name, string ProcessName, int ProcessId, string AppIdentity);
 
-public sealed record WindowInfo(string Id, string Title, string App, string ProcessName, Bounds Bounds, bool Focused);
+public sealed record WindowInfo(
+    string Id,
+    string Title,
+    string App,
+    string AppIdentity,
+    string ProcessName,
+    int ProcessId,
+    string ClassName,
+    Bounds Bounds,
+    bool Focused);
 
 public sealed record UiElement(
     string Id,
+    string? ParentId,
     string Role,
     string Name,
     string? AutomationId,
+    string ClassName,
     Bounds Bounds,
     bool Enabled,
-    bool Offscreen);
+    bool Offscreen,
+    IReadOnlyList<string> SupportedPatterns,
+    string? Value = null);
 
 public sealed record WindowInspection(WindowInfo Window, IReadOnlyList<UiElement> Elements, bool Truncated);
 
-public sealed record Screenshot(string Data, string MimeType, int Width, int Height, string Source);
+public sealed record Screenshot(
+    string Data,
+    string MimeType,
+    int Width,
+    int Height,
+    string Source,
+    string CoordinateSystem,
+    int Dpi,
+    Bounds CaptureBounds);
 
 public sealed record OperationResult(bool Ok, bool Changed, WindowInfo? Window = null, string? Detail = null);
 
@@ -44,15 +65,18 @@ public sealed record CaptureScreenParams(string? WindowId);
 public sealed record LaunchAppParams(string App, string[]? Arguments);
 public sealed record FocusWindowParams(string WindowId);
 public sealed record ClickParams(int X, int Y, string? Button);
-public sealed record ClickElementParams(string WindowId, string? ElementId, string? Role, string? Name, string? AutomationId);
+public sealed record ClickElementParams(string WindowId, string? ElementId, string? Role, string? Name, string? AutomationId, string? ClassName);
 public sealed record DoubleClickParams(int X, int Y);
-public sealed record TypeTextParams(string Text, string? WindowId, string? ElementId, string? Role, string? Name);
+public sealed record TypeTextParams(string Text, string? WindowId, string? ElementId, string? Role, string? Name, string? AutomationId, string? ClassName);
 public sealed record PressKeyParams(string Key);
 public sealed record ScrollParams(int Amount, int? X, int? Y);
 public sealed record WaitParams(int Milliseconds);
+public sealed record CancelRequestParams(string RequestId);
 
 public static class Protocol
 {
+    private static readonly object WriteLock = new();
+
     public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -74,7 +98,10 @@ public static class Protocol
 
     public static void Write(NativeResponse response)
     {
-        Console.WriteLine(JsonSerializer.Serialize(response, JsonOptions));
-        Console.Out.Flush();
+        lock (WriteLock)
+        {
+            Console.WriteLine(JsonSerializer.Serialize(response, JsonOptions));
+            Console.Out.Flush();
+        }
     }
 }

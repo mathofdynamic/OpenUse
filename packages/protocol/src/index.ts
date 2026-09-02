@@ -11,25 +11,34 @@ export interface AppInfo {
   id: string;
   name: string;
   processName: string;
+  processId: number;
+  appIdentity: string;
 }
 
 export interface WindowInfo {
   id: string;
   title: string;
   app: string;
+  appIdentity: string;
   processName: string;
+  processId: number;
+  className: string;
   bounds: Bounds;
   focused: boolean;
 }
 
 export interface UiElement {
   id: string;
+  parentId?: string;
   role: string;
   name: string;
   automationId?: string;
+  className: string;
   bounds: Bounds;
   enabled: boolean;
   offscreen: boolean;
+  supportedPatterns: string[];
+  value?: string;
 }
 
 export interface WindowInspection {
@@ -44,6 +53,9 @@ export interface Screenshot {
   width: number;
   height: number;
   source: "screen" | "window";
+  coordinateSystem: "virtual-screen-physical-pixels";
+  dpi: number;
+  captureBounds: Bounds;
 }
 
 export interface OperationResult {
@@ -68,6 +80,7 @@ export interface NativeMethodParams {
     role?: string;
     name?: string;
     automationId?: string;
+    className?: string;
   };
   doubleClick: { x: number; y: number };
   typeText: {
@@ -76,6 +89,8 @@ export interface NativeMethodParams {
     elementId?: string;
     role?: string;
     name?: string;
+    automationId?: string;
+    className?: string;
   };
   pressKey: { key: string };
   scroll: { amount: number; x?: number; y?: number };
