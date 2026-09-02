@@ -87,12 +87,14 @@ describe("ComputerUseAgent", () => {
       "inspectWindow",
     ]);
     expect(events.some((event) => (event as { type?: string }).type === "action.completed")).toBe(true);
+    const completed = events.find((event) => (event as { type?: string }).type === "action.completed" && (event as { actionId?: string }).actionId?.endsWith("-action-4")) as { telemetry?: { interactionMethod?: string; retryCount?: number } } | undefined;
+    expect(completed?.telemetry).toMatchObject({ interactionMethod: "uia-native", retryCount: 0 });
   });
 
   it("stops before a provider step when cancelled", async () => {
     const provider = new ScriptedProvider([]);
     const computer = new MockComputerController();
-    const permissions = new PermissionEngine(new InMemoryPermissionStore(), { request: async () => "deny" });
+    const permissions = new PermissionEngine(new InMemoryPermissionStore(), { request: async () => "allow-once" });
     const abort = new AbortController();
     abort.abort();
     const agent = new ComputerUseAgent(provider, computer, permissions);
@@ -104,6 +106,28 @@ describe("ComputerUseAgent", () => {
       onEvent: () => undefined,
     })).rejects.toMatchObject({ code: "TASK_CANCELLED" });
     expect(provider.calls).toHaveLength(0);
+  });
+
+  it("records a coordinate action after a screenshot as a vision fallback", async () => {
+    const provider = new ScriptedProvider([
+      assistantTool("computer_capture_screen", "vision-1", {}),
+      assistantTool("computer_click", "vision-2", { x: 200, y: 200 }),
+      assistantTool("computer_finish", "vision-3", { summary: "The visual target was handled." }),
+    ]);
+    const computer = new MockComputerController();
+    const permissions = new PermissionEngine(new InMemoryPermissionStore(), { request: async () => "allow-once" });
+    const events: unknown[] = [];
+
+    await new ComputerUseAgent(provider, computer, permissions).run({
+      taskId: "vision-task",
+      command: "Use the visual fallback.",
+      modelId: "openai/gpt-5.4",
+      abortSignal: new AbortController().signal,
+      onEvent: (event) => events.push(event),
+    });
+
+    const completed = events.find((event) => (event as { type?: string }).type === "action.completed" && (event as { actionId?: string }).actionId?.endsWith("-action-2")) as { telemetry?: { interactionMethod?: string } } | undefined;
+    expect(completed?.telemetry?.interactionMethod).toBe("vision-coordinate");
   });
 
   it("requests a fresh observation after a stale window target instead of replaying blindly", async () => {

@@ -210,38 +210,38 @@ export class MockComputerController implements ComputerController {
   async click(input: NativeMethodParams["click"], signal?: AbortSignal) {
     this.check(signal);
     this.record("click", input);
-    return { ok: true as const, changed: true };
+    return { ok: true as const, changed: true, interactionMethod: "coordinate-input" as const };
   }
 
   async clickElement(input: NativeMethodParams["clickElement"], signal?: AbortSignal) {
     this.check(signal);
     this.record("clickElement", input);
-    return { ok: true as const, changed: true };
+    return { ok: true as const, changed: true, interactionMethod: "uia-native" as const, targetElementId: input.elementId };
   }
 
   async doubleClick(input: NativeMethodParams["doubleClick"], signal?: AbortSignal) {
     this.check(signal);
     this.record("doubleClick", input);
-    return { ok: true as const, changed: true };
+    return { ok: true as const, changed: true, interactionMethod: "coordinate-input" as const };
   }
 
   async typeText(input: NativeMethodParams["typeText"], signal?: AbortSignal) {
     this.check(signal);
     this.record("typeText", input);
     this.state.typedText.push(input.text);
-    return { ok: true as const, changed: true };
+    return { ok: true as const, changed: true, interactionMethod: "uia-native" as const, targetElementId: input.elementId };
   }
 
   async pressKey(input: NativeMethodParams["pressKey"], signal?: AbortSignal) {
     this.check(signal);
     this.record("pressKey", input);
-    return { ok: true as const, changed: true };
+    return { ok: true as const, changed: true, interactionMethod: "keyboard-input" as const };
   }
 
   async scroll(input: NativeMethodParams["scroll"], signal?: AbortSignal) {
     this.check(signal);
     this.record("scroll", input);
-    return { ok: true as const, changed: true };
+    return { ok: true as const, changed: true, interactionMethod: "coordinate-input" as const };
   }
 
   async wait(milliseconds: number, signal?: AbortSignal) {

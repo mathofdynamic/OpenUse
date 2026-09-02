@@ -28,6 +28,8 @@ public sealed class WindowsComputerController
     private const uint KeyEventKeyUp = 0x0002;
     private const uint KeyEventUnicode = 0x0004;
     private const uint InputKeyboard = 1;
+    private const uint MonitorInfoPrimary = 1;
+    private const uint MonitorDefaultToNull = 0;
 
     private static readonly (AutomationPattern Pattern, string Name)[] PatternDefinitions =
     {
@@ -50,15 +52,16 @@ public sealed class WindowsComputerController
             "listWindows" => Task.FromResult<object>(ListWindows()),
             "inspectWindow" => Task.FromResult<object>(InspectWindow(Protocol.ReadParams<InspectWindowParams>(parameters).WindowId)),
             "captureScreen" => Task.FromResult<object>(CaptureScreen(Protocol.ReadParams<CaptureScreenParams>(parameters).WindowId)),
-            "launchApp" => Task.FromResult<object>(LaunchApp(Protocol.ReadParams<LaunchAppParams>(parameters))),
-            "focusWindow" => Task.FromResult<object>(FocusWindow(Protocol.ReadParams<FocusWindowParams>(parameters).WindowId)),
-            "click" => Task.FromResult<object>(Click(Protocol.ReadParams<ClickParams>(parameters))),
-            "clickElement" => Task.FromResult<object>(ClickElement(Protocol.ReadParams<ClickElementParams>(parameters))),
+            "launchApp" => Task.FromResult<object>(LaunchApp(Protocol.ReadParams<LaunchAppParams>(parameters), cancellationToken)),
+            "focusWindow" => Task.FromResult<object>(FocusWindow(Protocol.ReadParams<FocusWindowParams>(parameters).WindowId, cancellationToken)),
+            "click" => Task.FromResult<object>(Click(Protocol.ReadParams<ClickParams>(parameters), cancellationToken)),
+            "clickElement" => Task.FromResult<object>(ClickElement(Protocol.ReadParams<ClickElementParams>(parameters), cancellationToken)),
             "doubleClick" => Task.FromResult<object>(DoubleClick(Protocol.ReadParams<DoubleClickParams>(parameters), cancellationToken)),
             "typeText" => Task.FromResult<object>(TypeText(Protocol.ReadParams<TypeTextParams>(parameters), cancellationToken)),
-            "pressKey" => Task.FromResult<object>(PressKey(Protocol.ReadParams<PressKeyParams>(parameters))),
-            "scroll" => Task.FromResult<object>(Scroll(Protocol.ReadParams<ScrollParams>(parameters))),
+            "pressKey" => Task.FromResult<object>(PressKey(Protocol.ReadParams<PressKeyParams>(parameters), cancellationToken)),
+            "scroll" => Task.FromResult<object>(Scroll(Protocol.ReadParams<ScrollParams>(parameters), cancellationToken)),
             "wait" => WaitAsync(Protocol.ReadParams<WaitParams>(parameters).Milliseconds, cancellationToken),
+            "selfTest" => Task.FromResult<object>(SelfTest()),
             _ => throw new NativeControllerException("UNSUPPORTED_ACTION", $"Unknown native method: {method}"),
         };
     }
@@ -176,7 +179,7 @@ public sealed class WindowsComputerController
         return new WindowInspection(window, elements, truncated);
     }
 
-    private static OperationResult LaunchApp(LaunchAppParams input)
+    private static OperationResult LaunchApp(LaunchAppParams input, CancellationToken cancellationToken)
     {
         var app = input.App?.Trim() ?? string.Empty;
         if (app.Length == 0 || app.Length > 160 || app.Contains('\n') || app.Contains('\r'))
@@ -188,6 +191,7 @@ public sealed class WindowsComputerController
             throw new NativeControllerException("UNSUPPORTED_ACTION", "Shells, installers, and scripting hosts are disabled in OpenUse.");
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             // CreateProcess-style launch avoids URI/file associations and shell
             // handlers. The tool surface is for executables, not command
             // interpreters or arbitrary shell actions.
@@ -205,22 +209,27 @@ public sealed class WindowsComputerController
         }
     }
 
-    private static OperationResult FocusWindow(string windowId)
+    private static OperationResult FocusWindow(string windowId, CancellationToken cancellationToken)
     {
         var handle = ParseWindowHandle(windowId);
         var window = ReadWindow(handle, GetForegroundWindow());
+        cancellationToken.ThrowIfCancellationRequested();
         ShowWindow(handle, SwRestore);
+        cancellationToken.ThrowIfCancellationRequested();
         if (!SetForegroundWindow(handle)) throw new NativeControllerException("STALE_UI_STATE", $"Could not focus {window.Title}.");
         return new OperationResult(true, true, ReadWindow(handle, handle), $"Focused {window.Title}.");
     }
 
-    private static OperationResult Click(ClickParams input)
+    private static OperationResult Click(ClickParams input, CancellationToken cancellationToken)
     {
-        ValidateCoordinates(input.X, input.Y);
+        if (!input.X.HasValue || !input.Y.HasValue) throw new NativeControllerException("INVALID_TOOL_INPUT", "Both click coordinates are required.");
+        ValidateCoordinates(input.X.Value, input.Y.Value);
         var button = (input.Button ?? "left").ToLowerInvariant();
         if (button is not ("left" or "right" or "middle"))
             throw new NativeControllerException("INVALID_TOOL_INPUT", "The mouse button must be left, right, or middle.");
-        MoveCursor(input.X, input.Y);
+        cancellationToken.ThrowIfCancellationRequested();
+        MoveCursor(input.X.Value, input.Y.Value);
+        cancellationToken.ThrowIfCancellationRequested();
         var flags = button switch
         {
             "right" => (MouseEventRightDown, MouseEventRightUp),
@@ -229,14 +238,14 @@ public sealed class WindowsComputerController
         };
         mouse_event(flags.Item1, 0, 0, 0, UIntPtr.Zero);
         mouse_event(flags.Item2, 0, 0, 0, UIntPtr.Zero);
-        return new OperationResult(true, true, null, $"Clicked {button} mouse button.");
+        return new OperationResult(true, true, null, $"Clicked {button} mouse button.", "coordinate-input");
     }
 
-    private static OperationResult ClickElement(ClickElementParams input)
+    private static OperationResult ClickElement(ClickElementParams input, CancellationToken cancellationToken)
     {
         try
         {
-            return ClickElementCore(input);
+            return ClickElementCore(input, cancellationToken);
         }
         catch (ElementNotAvailableException)
         {
@@ -248,54 +257,67 @@ public sealed class WindowsComputerController
         }
     }
 
-    private static OperationResult ClickElementCore(ClickElementParams input)
+    private static OperationResult ClickElementCore(ClickElementParams input, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(input.WindowId) || input.ElementId is null && input.Role is null && input.Name is null && input.AutomationId is null && input.ClassName is null)
             throw new NativeControllerException("INVALID_TOOL_INPUT", "A semantic element selector is required.");
         var windowHandle = ParseWindowHandle(input.WindowId);
         var window = ReadWindow(windowHandle, GetForegroundWindow());
+        cancellationToken.ThrowIfCancellationRequested();
         ShowWindow(windowHandle, SwRestore);
+        cancellationToken.ThrowIfCancellationRequested();
         if (!SetForegroundWindow(windowHandle)) throw new NativeControllerException("STALE_UI_STATE", "Could not focus the target window before clicking.");
-        var element = FindElement(windowHandle, input.ElementId, input.Role, input.Name, input.AutomationId, input.ClassName);
+        var match = FindElement(windowHandle, input.ElementId, input.Role, input.Name, input.AutomationId, input.ClassName);
+        var element = match.Element;
+        var targetElementId = match.Id;
         if (!element.Current.IsEnabled || element.Current.IsOffscreen)
             throw new NativeControllerException("STALE_UI_STATE", "The semantic control is disabled or offscreen.");
         if (ElementBounds(element).Width <= 0 || ElementBounds(element).Height <= 0)
             throw new NativeControllerException("STALE_UI_STATE", "The semantic control no longer has usable bounds.");
+        cancellationToken.ThrowIfCancellationRequested();
         try { element.SetFocus(); } catch { /* Some controls cannot receive focus. */ }
         if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ((InvokePattern)invoke).Invoke();
-            return new OperationResult(true, true, window, $"Invoked {ElementLabel(element)}.");
+            return new OperationResult(true, true, window, $"Invoked {ElementLabel(element)}.", "uia-native", targetElementId);
         }
         if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var selection))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ((SelectionItemPattern)selection).Select();
-            return new OperationResult(true, true, window, $"Selected {ElementLabel(element)}.");
+            return new OperationResult(true, true, window, $"Selected {ElementLabel(element)}.", "uia-native", targetElementId);
         }
         if (element.TryGetCurrentPattern(TogglePattern.Pattern, out var toggle))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ((TogglePattern)toggle).Toggle();
-            return new OperationResult(true, true, window, $"Toggled {ElementLabel(element)}.");
+            return new OperationResult(true, true, window, $"Toggled {ElementLabel(element)}.", "uia-native", targetElementId);
         }
         var bounds = ElementBounds(element);
+        cancellationToken.ThrowIfCancellationRequested();
         MoveCursor(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);
+        cancellationToken.ThrowIfCancellationRequested();
         mouse_event(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
         mouse_event(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
-        return new OperationResult(true, true, window, $"Clicked {ElementLabel(element)} by its bounds.");
+        return new OperationResult(true, true, window, $"Clicked {ElementLabel(element)} by its bounds.", "element-coordinate", targetElementId);
     }
 
     private static OperationResult DoubleClick(DoubleClickParams input, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        ValidateCoordinates(input.X, input.Y);
-        MoveCursor(input.X, input.Y);
+        if (!input.X.HasValue || !input.Y.HasValue) throw new NativeControllerException("INVALID_TOOL_INPUT", "Both double-click coordinates are required.");
+        ValidateCoordinates(input.X.Value, input.Y.Value);
+        cancellationToken.ThrowIfCancellationRequested();
+        MoveCursor(input.X.Value, input.Y.Value);
+        cancellationToken.ThrowIfCancellationRequested();
         mouse_event(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
         mouse_event(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
         if (cancellationToken.WaitHandle.WaitOne(55)) throw new OperationCanceledException(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         mouse_event(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
         mouse_event(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
-        return new OperationResult(true, true, null, "Double-clicked the requested position.");
+        return new OperationResult(true, true, null, "Double-clicked the requested position.", "coordinate-input");
     }
 
     private static OperationResult TypeText(TypeTextParams input, CancellationToken cancellationToken)
@@ -306,27 +328,33 @@ public sealed class WindowsComputerController
         if (input.WindowId is not null)
         {
             var handle = ParseWindowHandle(input.WindowId);
+            cancellationToken.ThrowIfCancellationRequested();
             ShowWindow(handle, SwRestore);
+            cancellationToken.ThrowIfCancellationRequested();
             if (!SetForegroundWindow(handle)) throw new NativeControllerException("STALE_UI_STATE", "Could not focus the target window before typing.");
         }
         AutomationElement? target = null;
+        string? targetElementId = null;
         if (input.WindowId is not null && (input.ElementId is not null || input.Role is not null || input.Name is not null || input.AutomationId is not null || input.ClassName is not null))
         {
-            target = FindElement(ParseWindowHandle(input.WindowId), input.ElementId, input.Role, input.Name, input.AutomationId, input.ClassName);
+            var match = FindElement(ParseWindowHandle(input.WindowId), input.ElementId, input.Role, input.Name, input.AutomationId, input.ClassName);
+            target = match.Element;
+            targetElementId = match.Id;
             try { target.SetFocus(); }
             catch (ElementNotAvailableException) { throw new NativeControllerException("STALE_UI_STATE", "The target text control disappeared before typing."); }
             catch (InvalidOperationException) { throw new NativeControllerException("STALE_UI_STATE", "The target text control could not receive focus."); }
         }
         EnsureNotCredentialElement(target);
         AutomationElement? focused = null;
-        try { focused = AutomationElement.FocusedElement; } catch { }
+        try { focused = AutomationElement.FocusedElement; }
+        catch { throw new NativeControllerException("UNSUPPORTED_ACTION", "OpenUse could not safely inspect the focused control before typing."); }
         EnsureNotCredentialElement(focused);
         if (target is not null && TrySetValue(target, input.Text))
-            return new OperationResult(true, true, null, $"Set {input.Text.Length} characters through UI Automation.");
+            return new OperationResult(true, true, null, $"Set {input.Text.Length} characters through UI Automation.", "uia-native", targetElementId);
         if (target is null && focused is not null && TrySetValue(focused, input.Text))
-            return new OperationResult(true, true, null, $"Set {input.Text.Length} characters through UI Automation.");
+            return new OperationResult(true, true, null, $"Set {input.Text.Length} characters through UI Automation.", "uia-native", targetElementId);
         SendUnicodeText(input.Text, cancellationToken);
-        return new OperationResult(true, true, null, $"Typed {input.Text.Length} characters.");
+        return new OperationResult(true, true, null, $"Typed {input.Text.Length} characters.", "keyboard-input", targetElementId);
     }
 
     private static bool TrySetValue(AutomationElement element, string text)
@@ -352,36 +380,48 @@ public sealed class WindowsComputerController
         {
             var role = RoleFor(element.Current.ControlType);
             var name = element.Current.Name ?? string.Empty;
-            if (CredentialWords.IsMatch($"{role} {name}"))
+            var automationId = element.Current.AutomationId ?? string.Empty;
+            var className = element.Current.ClassName ?? string.Empty;
+            if (CredentialWords.IsMatch($"{role} {name} {automationId} {className}"))
                 throw new NativeControllerException("CREDENTIAL_INTERACTION_DISABLED", "Credential and password entry is disabled in OpenUse.");
         }
         catch (NativeControllerException)
         {
             throw;
         }
+        catch (ElementNotAvailableException)
+        {
+            throw new NativeControllerException("STALE_UI_STATE", "The focused control disappeared before OpenUse could verify it.");
+        }
+        catch (InvalidOperationException)
+        {
+            throw new NativeControllerException("STALE_UI_STATE", "The focused control could not be verified before typing.");
+        }
         catch
         {
-            // A few legacy controls can disappear while their properties are
-            // read. The agent still performs its target checks before typing.
+            throw new NativeControllerException("UNSUPPORTED_ACTION", "OpenUse could not safely verify the focused control before typing.");
         }
     }
 
-    private static OperationResult PressKey(PressKeyParams input)
+    private static OperationResult PressKey(PressKeyParams input, CancellationToken cancellationToken)
     {
         var key = input.Key?.Trim() ?? string.Empty;
         if (key.Length == 0 || key.Length > 80) throw new NativeControllerException("INVALID_TOOL_INPUT", "Key must contain between 1 and 80 characters.");
+        cancellationToken.ThrowIfCancellationRequested();
         SendKeyChord(key);
-        return new OperationResult(true, true, null, $"Pressed {key.ToUpperInvariant()}.");
+        return new OperationResult(true, true, null, $"Pressed {key.ToUpperInvariant()}.", "keyboard-input");
     }
 
-    private static OperationResult Scroll(ScrollParams input)
+    private static OperationResult Scroll(ScrollParams input, CancellationToken cancellationToken)
     {
-        if (input.Amount is < -20 or > 20) throw new NativeControllerException("INVALID_TOOL_INPUT", "Scroll amount must be between -20 and 20.");
+        if (!input.Amount.HasValue || input.Amount is < -20 or > 20) throw new NativeControllerException("INVALID_TOOL_INPUT", "Scroll amount must be between -20 and 20.");
         if (input.X.HasValue != input.Y.HasValue) throw new NativeControllerException("INVALID_TOOL_INPUT", "Scroll coordinates must be supplied together.");
         if (input.X.HasValue && input.Y.HasValue) ValidateCoordinates(input.X.Value, input.Y.Value);
+        cancellationToken.ThrowIfCancellationRequested();
         if (input.X.HasValue && input.Y.HasValue) MoveCursor(input.X.Value, input.Y.Value);
-        mouse_event(MouseEventWheel, 0, 0, unchecked((uint)(input.Amount * 120)), UIntPtr.Zero);
-        return new OperationResult(true, true, null, $"Scrolled {input.Amount} units.");
+        cancellationToken.ThrowIfCancellationRequested();
+        mouse_event(MouseEventWheel, 0, 0, unchecked((uint)(input.Amount.Value * 120)), UIntPtr.Zero);
+        return new OperationResult(true, true, null, $"Scrolled {input.Amount} units.", "coordinate-input");
     }
 
     private static Task<object> WaitAsync(int milliseconds, CancellationToken cancellationToken)
@@ -391,6 +431,129 @@ public sealed class WindowsComputerController
         if (cancellationToken.WaitHandle.WaitOne(milliseconds)) throw new OperationCanceledException(cancellationToken);
         return Task.FromResult<object>(new { ok = true, waitedMs = milliseconds });
     }
+
+    private static SelfTestResult SelfTest()
+    {
+        var uiAutomationAvailable = false;
+        try
+        {
+            uiAutomationAvailable = AutomationElement.RootElement is not null;
+        }
+        catch { }
+
+        var windowEnumerationAvailable = false;
+        try
+        {
+            _ = ListWindows();
+            windowEnumerationAvailable = true;
+        }
+        catch { }
+
+        var monitors = new List<MonitorInfo>();
+        try { monitors = EnumerateMonitors(); }
+        catch { }
+        var screenEnumerationAvailable = monitors.Count > 0 && GetSystemMetrics(78) > 0 && GetSystemMetrics(79) > 0;
+        var dpiAvailable = monitors.Count > 0 && monitors.All(monitor => monitor.Dpi > 0);
+
+        ScreenshotDiagnostics? screenshot = null;
+        var screenshotAvailable = false;
+        try
+        {
+            // Capture and immediately dispose of the image data. The self-test
+            // verifies the capture path without persisting or returning pixels.
+            var capture = CaptureScreen(null);
+            screenshot = new ScreenshotDiagnostics(capture.Width, capture.Height, capture.Dpi, capture.CoordinateSystem, capture.CaptureBounds);
+            screenshotAvailable = true;
+        }
+        catch { }
+
+        var inputApisAvailable = false;
+        try
+        {
+            inputApisAvailable = GetCursorPos(out _);
+        }
+        catch { }
+
+        var failures = new List<string>();
+        if (!uiAutomationAvailable) failures.Add("UI Automation");
+        if (!windowEnumerationAvailable) failures.Add("window enumeration");
+        if (!screenEnumerationAvailable) failures.Add("screen enumeration");
+        if (!screenshotAvailable) failures.Add("screen capture");
+        if (!dpiAvailable) failures.Add("DPI detection");
+        if (!inputApisAvailable) failures.Add("input API initialization");
+        return new SelfTestResult(
+            failures.Count == 0,
+            uiAutomationAvailable,
+            windowEnumerationAvailable,
+            screenEnumerationAvailable,
+            screenshotAvailable,
+            dpiAvailable,
+            inputApisAvailable,
+            monitors.Count,
+            monitors,
+            screenshot,
+            failures.Count == 0 ? null : $"Unavailable: {string.Join(", ", failures)}.");
+    }
+
+    private static List<MonitorInfo> EnumerateMonitors()
+    {
+        var monitors = new List<MonitorInfo>();
+        bool Callback(IntPtr monitorHandle, IntPtr deviceContext, ref RECT callbackRectangle, IntPtr state)
+        {
+            var info = new MONITORINFO { CbSize = Marshal.SizeOf<MONITORINFO>() };
+            if (!GetMonitorInfo(monitorHandle, ref info)) return true;
+            var dpi = ReadMonitorDpi(monitorHandle);
+            monitors.Add(new MonitorInfo(
+                monitors.Count,
+                ToBounds(info.Monitor),
+                ToBounds(info.Work),
+                dpi,
+                (info.Flags & MonitorInfoPrimary) != 0));
+            return true;
+        }
+
+        if (!EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, Callback, IntPtr.Zero)) return [];
+        return monitors;
+    }
+
+    private static int ReadMonitorDpi(IntPtr monitorHandle)
+    {
+        try
+        {
+            // GetDpiForWindow is DPI-aware. Avoid GetDpiForMonitor here because
+            // Microsoft documents that API as unsuitable for per-monitor-aware
+            // callers.
+            var representativeWindow = FindRepresentativeWindow(monitorHandle);
+            if (representativeWindow != IntPtr.Zero)
+            {
+                var windowDpi = GetDpiForWindow(representativeWindow);
+                if (windowDpi > 0) return (int)windowDpi;
+            }
+        }
+        catch { }
+        try
+        {
+            var systemDpi = GetDpiForSystem();
+            return systemDpi > 0 ? (int)systemDpi : 0;
+        }
+        catch { return 0; }
+    }
+
+    private static IntPtr FindRepresentativeWindow(IntPtr monitorHandle)
+    {
+        var found = IntPtr.Zero;
+        EnumWindows((handle, _) =>
+        {
+            if (!IsWindowVisible(handle) || !GetWindowRect(handle, out var rectangle)) return true;
+            var windowMonitor = MonitorFromRect(ref rectangle, MonitorDefaultToNull);
+            if (windowMonitor != monitorHandle) return true;
+            found = handle;
+            return false;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    private static Bounds ToBounds(RECT rectangle) => new(rectangle.Left, rectangle.Top, rectangle.Right - rectangle.Left, rectangle.Bottom - rectangle.Top);
 
     private static Screenshot CaptureScreen(string? windowId)
     {
@@ -453,21 +616,23 @@ public sealed class WindowsComputerController
         return resized;
     }
 
-    private static AutomationElement FindElement(IntPtr windowHandle, string? elementId, string? role, string? name, string? automationId, string? className)
+    private sealed record ElementMatch(AutomationElement Element, string Id);
+
+    private static ElementMatch FindElement(IntPtr windowHandle, string? elementId, string? role, string? name, string? automationId, string? className)
     {
         AutomationElement root;
         try { root = AutomationElement.FromHandle(windowHandle); }
         catch { throw new NativeControllerException("WINDOW_NOT_FOUND", "The target window is no longer available."); }
         var walker = TreeWalker.ControlViewWalker;
         var sequence = 0;
-        AutomationElement? found = null;
+        ElementMatch? found = null;
 
         void Visit(AutomationElement element, int depth)
         {
             if (found is not null || depth > MaxInspectionDepth) return;
             sequence += 1;
             var currentId = StableElementId(element, sequence);
-            if (Matches(element, currentId, elementId, role, name, automationId, className)) { found = element; return; }
+            if (Matches(element, currentId, elementId, role, name, automationId, className)) { found = new ElementMatch(element, currentId); return; }
             AutomationElement? child;
             try { child = walker.GetFirstChild(element); } catch { return; }
             while (child is not null && found is null)
@@ -523,7 +688,7 @@ public sealed class WindowsComputerController
                 enabled,
                 offscreen,
                 SupportedPatterns(element),
-                ReadElementValue(element, role, name));
+                ReadElementValue(element, role, name, automationId, className));
         }
         catch { return null; }
     }
@@ -556,9 +721,9 @@ public sealed class WindowsComputerController
     private static bool IsActionable(UiElement element) =>
         element.SupportedPatterns.Count > 0 || element.Role is "Button" or "CheckBox" or "ComboBox" or "Document" or "Edit" or "Hyperlink" or "ListItem" or "MenuItem" or "RadioButton" or "TabItem" or "TreeItem" or "Slider" or "Spinner";
 
-    private static string? ReadElementValue(AutomationElement element, string role, string name)
+    private static string? ReadElementValue(AutomationElement element, string role, string name, string? automationId, string className)
     {
-        if (CredentialWords.IsMatch($"{role} {name}")) return null;
+        if (CredentialWords.IsMatch($"{role} {name} {automationId} {className}")) return null;
         if (role is not ("Document" or "Edit" or "Text" or "ComboBox" or "ListItem" or "Window")) return null;
         try
         {
@@ -776,7 +941,7 @@ public sealed class WindowsComputerController
             || name.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static readonly Regex CredentialWords = new(@"\b(password|passcode|credential|secret|security code|one[- ]time code|otp)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex CredentialWords = new(@"\b(password|passcode|credential|secret|security code|one[- ]time code|otp)(?:\b|box|field)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private const int ErrorInsufficientBuffer = 122;
 
     private static void MoveCursor(int x, int y)
@@ -867,6 +1032,15 @@ public sealed class WindowsComputerController
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct MONITORINFO
+    {
+        public int CbSize;
+        public RECT Monitor;
+        public RECT Work;
+        public uint Flags;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT { public uint Type; public InputUnion Data; }
 
@@ -884,6 +1058,7 @@ public sealed class WindowsComputerController
     private struct KEYBDINPUT { public ushort VirtualKey; public ushort ScanCode; public uint Flags; public uint Time; public UIntPtr ExtraInfo; }
 
     private delegate bool EnumWindowsProc(IntPtr handle, IntPtr state);
+    private delegate bool MonitorEnumProc(IntPtr monitor, IntPtr deviceContext, ref RECT monitorRectangle, IntPtr state);
 
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr state);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr handle);
@@ -902,5 +1077,12 @@ public sealed class WindowsComputerController
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr handle);
     [DllImport("user32.dll")] private static extern uint GetDpiForSystem();
+    [DllImport("user32.dll")] private static extern bool EnumDisplayMonitors(IntPtr deviceContext, IntPtr clipRectangle, MonitorEnumProc callback, IntPtr state);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO monitorInfo);
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromRect(ref RECT rectangle, uint flags);
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT point);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern int GetApplicationUserModelId(IntPtr processHandle, ref uint applicationUserModelIdLength, StringBuilder? applicationUserModelId);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X; public int Y; }
 }

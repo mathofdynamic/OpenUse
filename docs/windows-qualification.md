@@ -32,7 +32,19 @@ The Windows-only SDK/sidecar commands were initially unavailable because `dotnet
 
 ## Commands
 
-From the repository root on Windows:
+From the repository root on Windows, use the turnkey commands:
+
+```powershell
+pnpm setup:windows
+pnpm verify:windows
+pnpm qualify:windows
+```
+
+The exact fresh-machine procedure is in [WINDOWS_TESTING.md](WINDOWS_TESTING.md); the ready-to-paste Windows Codex handoff is in [WINDOWS_CODEX_PROMPT.md](WINDOWS_CODEX_PROMPT.md).
+
+The qualification runner creates `.openuse/qualification/run-<timestamp>/` with `session.json`, `events.jsonl`, `results.json`, and `report.md`. `results.json` records three attempts per goal, the exact model ID and capability metadata, success/failure, action counts, actual UIA/element-coordinate/vision-coordinate methods, retries, stale recoveries, duration, and failure reason. The report is qualified only after 3/3 for each scenario and explicit reliability-check confirmation; a single-monitor environment may explicitly record multi-monitor as unavailable. It never stores screenshots by default.
+
+For lower-level diagnosis, run these from the repository root:
 
 ```powershell
 node --version
@@ -49,6 +61,8 @@ pnpm build
 ```
 
 `test:windows` is a protocol smoke test. It launches the published sidecar, verifies malformed JSON, unknown methods, invalid window IDs, `listWindows`, structured `wait`, cancellation/reuse, and graceful termination. It does not move the mouse or type into applications.
+
+The smoke test also invokes the sidecar `selfTest` command. It must report UI Automation, window enumeration, screen enumeration, screen capture, DPI detection, non-invasive input API initialization, and at least one monitor as available. It captures and disposes of one local screenshot to check the path but never persists or sends its pixels.
 
 ## Native build gate on this host
 

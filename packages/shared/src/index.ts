@@ -17,6 +17,122 @@ export type AgentStatus = "idle" | "running" | "completed" | "stopped" | "error"
 
 export type ActionRisk = "read" | "interaction" | "sensitive" | "destructive";
 
+export type InteractionMethod =
+  | "uia-native"
+  | "element-coordinate"
+  | "vision-coordinate"
+  | "coordinate-input"
+  | "keyboard-input";
+
+export interface ActionTelemetry {
+  interactionMethod?: InteractionMethod;
+  targetApp?: string;
+  targetWindowId?: string;
+  targetWindowTitle?: string;
+  targetElementId?: string;
+  retryCount: number;
+}
+
+export interface QualificationBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface QualificationWindowSnapshot {
+  id: string;
+  title: string;
+  app: string;
+  appIdentity: string;
+  processName: string;
+  processId: number;
+  className: string;
+  bounds: QualificationBounds;
+  focused: boolean;
+}
+
+export interface QualificationElementSnapshot {
+  id: string;
+  parentId?: string;
+  role: string;
+  name: string;
+  automationId?: string;
+  className: string;
+  bounds: QualificationBounds;
+  enabled: boolean;
+  offscreen: boolean;
+  supportedPatterns: string[];
+  value?: string;
+}
+
+export interface QualificationScreenshotSnapshot {
+  width: number;
+  height: number;
+  originX: number;
+  originY: number;
+  captureWidth: number;
+  captureHeight: number;
+  dpi: number;
+  coordinateSystem: string;
+}
+
+export interface QualificationDebugSnapshot {
+  taskId: string;
+  step: number;
+  actionCount: number;
+  tool: string;
+  retryCount: number;
+  result: "success" | "failure";
+  errorCode?: OpenUseErrorCode;
+  interactionMethod?: InteractionMethod;
+  targetApp?: string;
+  targetWindowId?: string;
+  targetWindowTitle?: string;
+  targetElementId?: string;
+  window?: QualificationWindowSnapshot;
+  elements: QualificationElementSnapshot[];
+  truncated?: boolean;
+  screenshot?: QualificationScreenshotSnapshot;
+  detail?: string;
+}
+
+export interface MonitorDiagnostics {
+  index: number;
+  bounds: QualificationBounds;
+  workArea: QualificationBounds;
+  dpi: number;
+  primary: boolean;
+}
+
+export interface SelfTestScreenshotDiagnostics {
+  width: number;
+  height: number;
+  dpi: number;
+  coordinateSystem: string;
+  captureBounds: QualificationBounds;
+}
+
+export interface EngineSelfTestResult {
+  ok: boolean;
+  uiAutomationAvailable: boolean;
+  windowEnumerationAvailable: boolean;
+  screenEnumerationAvailable: boolean;
+  screenshotAvailable: boolean;
+  dpiAvailable: boolean;
+  inputApisAvailable: boolean;
+  monitorCount: number;
+  monitors: MonitorDiagnostics[];
+  screenshot?: SelfTestScreenshotDiagnostics;
+  detail?: string;
+}
+
+export interface QualificationSessionInfo {
+  enabled: boolean;
+  runId?: string;
+  selfTest?: EngineSelfTestResult;
+}
+
 export type PermissionLevel = "ALLOW" | "ASK" | "DENY";
 
 export type PermissionDecision = "allow-once" | "always-allow" | "deny";
@@ -42,6 +158,11 @@ export interface EngineStatus {
   platform: string;
   state: "ready" | "starting" | "offline" | "unsupported" | "stopped";
   detail: string;
+  canStart?: boolean;
+  pid?: number;
+  protocol?: string;
+  lastHeartbeatAt?: string;
+  lastAction?: string;
 }
 
 export interface AppSettings {
@@ -54,6 +175,7 @@ export interface AppSettings {
 export interface AppSnapshot {
   settings: AppSettings;
   engine: EngineStatus;
+  qualification: QualificationSessionInfo;
 }
 
 export interface TimelineAction {
@@ -67,6 +189,12 @@ export interface TimelineAction {
   errorCode?: OpenUseErrorCode;
   errorMessage?: string;
   detail?: string;
+  interactionMethod?: InteractionMethod;
+  targetApp?: string;
+  targetWindowId?: string;
+  targetWindowTitle?: string;
+  targetElementId?: string;
+  retryCount?: number;
 }
 
 export type RuntimeEvent =
@@ -75,6 +203,7 @@ export type RuntimeEvent =
       taskId: string;
       command: string;
       modelId: string;
+      capabilities: ModelCapabilities;
       at: string;
     }
   | {
@@ -120,6 +249,7 @@ export type RuntimeEvent =
       actionId: string;
       durationMs: number;
       detail?: string;
+      telemetry?: ActionTelemetry;
       at: string;
     }
   | {
@@ -128,6 +258,8 @@ export type RuntimeEvent =
       actionId: string;
       code: OpenUseErrorCode;
       message: string;
+      durationMs: number;
+      telemetry?: ActionTelemetry;
       at: string;
     }
   | {
@@ -143,6 +275,16 @@ export type RuntimeEvent =
   | {
       type: "engine.status";
       status: EngineStatus;
+      at: string;
+    }
+  | {
+      type: "qualification.debug";
+      debug: QualificationDebugSnapshot;
+      at: string;
+    }
+  | {
+      type: "qualification.self-test";
+      result: EngineSelfTestResult;
       at: string;
     };
 

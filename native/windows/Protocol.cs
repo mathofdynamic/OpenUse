@@ -58,18 +58,41 @@ public sealed record Screenshot(
     int Dpi,
     Bounds CaptureBounds);
 
-public sealed record OperationResult(bool Ok, bool Changed, WindowInfo? Window = null, string? Detail = null);
+public sealed record OperationResult(
+    bool Ok,
+    bool Changed,
+    WindowInfo? Window = null,
+    string? Detail = null,
+    string? InteractionMethod = null,
+    string? TargetElementId = null);
+
+public sealed record MonitorInfo(int Index, Bounds Bounds, Bounds WorkArea, int Dpi, bool Primary);
+
+public sealed record ScreenshotDiagnostics(int Width, int Height, int Dpi, string CoordinateSystem, Bounds CaptureBounds);
+
+public sealed record SelfTestResult(
+    bool Ok,
+    bool UiAutomationAvailable,
+    bool WindowEnumerationAvailable,
+    bool ScreenEnumerationAvailable,
+    bool ScreenshotAvailable,
+    bool DpiAvailable,
+    bool InputApisAvailable,
+    int MonitorCount,
+    IReadOnlyList<MonitorInfo> Monitors,
+    ScreenshotDiagnostics? Screenshot = null,
+    string? Detail = null);
 
 public sealed record InspectWindowParams(string WindowId);
 public sealed record CaptureScreenParams(string? WindowId);
 public sealed record LaunchAppParams(string App, string[]? Arguments);
 public sealed record FocusWindowParams(string WindowId);
-public sealed record ClickParams(int X, int Y, string? Button);
+public sealed record ClickParams(int? X, int? Y, string? Button);
 public sealed record ClickElementParams(string WindowId, string? ElementId, string? Role, string? Name, string? AutomationId, string? ClassName);
-public sealed record DoubleClickParams(int X, int Y);
+public sealed record DoubleClickParams(int? X, int? Y);
 public sealed record TypeTextParams(string Text, string? WindowId, string? ElementId, string? Role, string? Name, string? AutomationId, string? ClassName);
 public sealed record PressKeyParams(string Key);
-public sealed record ScrollParams(int Amount, int? X, int? Y);
+public sealed record ScrollParams(int? Amount, int? X, int? Y);
 public sealed record WaitParams(int Milliseconds);
 public sealed record CancelRequestParams(string RequestId);
 
@@ -90,7 +113,7 @@ public static class Protocol
             return value.Deserialize<T>(JsonOptions)
                 ?? throw new NativeControllerException("INVALID_TOOL_INPUT", "The request parameters were empty.");
         }
-        catch (JsonException exception)
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or NotSupportedException)
         {
             throw new NativeControllerException("INVALID_TOOL_INPUT", $"The request parameters were invalid: {exception.Message}");
         }

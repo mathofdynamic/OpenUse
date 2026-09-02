@@ -23,4 +23,4 @@ OpenUse is local-first, but Computer Use is inherently powerful. The MVP uses ex
 
 ## Data leaving the machine
 
-Only the user command, bounded UI observations needed for reasoning, and explicitly requested reduced screenshots are sent to the selected Gateway model. OpenUse does not create telemetry for screenshots, typed text, file contents, accessibility trees, or API keys. Development logs use redacted summaries and may include action names, durations, model ID, status, and token counts when available.
+Only the user command, bounded UI observations needed for reasoning, and explicitly requested reduced screenshots are sent to the selected Gateway model. OpenUse does not persist telemetry for screenshots, typed text, file contents, raw accessibility trees, or API keys. Qualification mode may display a bounded normalized tree in the local developer UI, while its recorder stores only element counts and safe window metadata. Development logs use redacted summaries and may include action names, durations, actual interaction methods, model ID, status, and token counts when available.

@@ -1,3 +1,4 @@
+import type { GatewayConnectionResult } from "@openuse/ai";
 import type { AppSnapshot, PermissionDecision, PermissionLevel, RuntimeEvent } from "@openuse/shared";
 
 declare global {
@@ -6,6 +7,7 @@ declare global {
       getSnapshot(): Promise<AppSnapshot>;
       setModel(modelId: string): Promise<void>;
       saveGatewayApiKey(apiKey: string): Promise<void>;
+      testGatewayConnection(modelId: string): Promise<GatewayConnectionResult>;
       startTask(command: string): Promise<void>;
       stopTask(): Promise<void>;
       decidePermission(id: string, decision: PermissionDecision): Promise<void>;

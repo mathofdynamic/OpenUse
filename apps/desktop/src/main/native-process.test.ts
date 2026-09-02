@@ -60,6 +60,7 @@ describe("native sidecar process boundary", () => {
 
     await expect(engine.request("listWindows", {})).rejects.toMatchObject({ code: "NATIVE_ENGINE_OFFLINE" });
     expect(engine.status.state).toBe("offline");
+    expect(engine.status.canStart).toBe(true);
   });
 
   it("cancels an in-flight request without waiting for the native timeout", async () => {
@@ -97,5 +98,8 @@ done`);
 
     await expect(engine.request("listWindows", {})).resolves.toEqual({ windows: [] });
     expect(engine.status.state).toBe("ready");
+    expect(engine.status.protocol).toBe("json-lines/v1");
+    expect(engine.status.lastAction).toBe("listWindows");
+    expect(engine.status.lastHeartbeatAt).toBeDefined();
   });
 });

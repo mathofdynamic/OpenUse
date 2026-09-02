@@ -6,7 +6,9 @@ The controller intentionally exposes no TCP listener, shell, PowerShell, arbitra
 
 The process keeps a reader thread separate from a dedicated STA worker so cancellation requests can be received while a bounded native action is in progress. Its JSON-lines stdout is protocol-only; diagnostics are sent to stderr. UI Automation runtime IDs are used as element IDs, and stale/disappeared elements return structured errors. Window records carry process/class identity and packaged-app identity when Windows exposes one.
 
-The sidecar is PerMonitorV2 DPI-aware. UI Automation bounds, pointer coordinates, and captures use virtual-screen physical pixels. Captures report the DPI, reduced image dimensions, and original physical capture bounds so a vision fallback can map image coordinates deliberately. The desktop parent uses the internal `cancel` protocol method on stop; it does not expose that method to the model.
+The sidecar sets WinForms `HighDpiMode.PerMonitorV2` before using UI Automation or screen APIs. UI Automation bounds, pointer coordinates, and captures use virtual-screen physical pixels. Captures report the DPI, reduced image dimensions, and original physical capture bounds so a vision fallback can map image coordinates deliberately. The desktop parent uses the internal `cancel` protocol method on stop; it does not expose that method to the model.
+
+The internal `selfTest` method checks UI Automation, top-level window enumeration, virtual-screen/monitor enumeration, one disposable capture, DPI detection, and safe input API initialization. It returns monitor bounds, work areas, DPI, and capture dimensions without returning screenshot pixels. The Windows JSON-lines smoke test requires all reported capabilities to be available.
 
 Build from a Windows machine with the .NET 8 SDK:
 

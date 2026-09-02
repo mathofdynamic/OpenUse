@@ -1,0 +1,13 @@
+{
+  "id": "notepad-save-as",
+  "title": "Notepad Save As",
+  "task": "Open Notepad, type \"OpenUse test file\", and save it as openuse-test.txt on my Desktop.",
+  "expectedOutcome": "Notepad saves the requested text as openuse-test.txt on the user's Desktop and the saved state is verified through UI state.",
+  "maxActions": 30,
+  "repeatCount": 3,
+  "criteria": [
+    "The native Save As dialog is inspected after it appears.",
+    "The filename and Desktop location are selected through OpenUse tools.",
+    "The saved state is verified through UI state; no arbitrary filesystem tool is introduced."
+  ]
+}

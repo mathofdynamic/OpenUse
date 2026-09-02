@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { EngineSelfTestResult, InteractionMethod } from "@openuse/shared";
 
 export interface Bounds {
   x: number;
@@ -64,6 +65,8 @@ export interface OperationResult {
   window?: WindowInfo;
   inspection?: WindowInspection;
   detail?: string;
+  interactionMethod?: InteractionMethod;
+  targetElementId?: string;
 }
 
 export interface NativeMethodParams {
@@ -95,6 +98,7 @@ export interface NativeMethodParams {
   pressKey: { key: string };
   scroll: { amount: number; x?: number; y?: number };
   wait: { milliseconds: number };
+  selfTest: Record<string, never>;
 }
 
 export interface NativeMethodResult {
@@ -111,6 +115,7 @@ export interface NativeMethodResult {
   pressKey: OperationResult;
   scroll: OperationResult;
   wait: { ok: true; waitedMs: number };
+  selfTest: EngineSelfTestResult;
 }
 
 export type NativeMethod = keyof NativeMethodParams;

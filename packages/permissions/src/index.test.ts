@@ -4,6 +4,7 @@ import {
   PermissionEngine,
   classifyActionRisk,
   defaultPermissionRecords,
+  isCredentialTarget,
 } from "./index";
 
 describe("application permissions", () => {
@@ -54,6 +55,11 @@ describe("application permissions", () => {
     expect(classifyActionRisk("computer_press_key", { key: "DELETE" })).toBe("destructive");
     expect(classifyActionRisk("computer_type_text", { role: "Password" })).toBe("sensitive");
     expect(classifyActionRisk("computer_launch_app", { appName: "Settings" })).toBe("sensitive");
+  });
+
+  it("recognizes credential controls by common compound field names", () => {
+    expect(isCredentialTarget("Edit", "PasswordBox")).toBe(true);
+    expect(isCredentialTarget("Edit", "Password field")).toBe(true);
   });
 
   it("blocks known credential applications before prompting", async () => {

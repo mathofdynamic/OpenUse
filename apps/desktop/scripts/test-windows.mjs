@@ -94,6 +94,14 @@ try {
   const invalidWindow = await raw(JSON.stringify({ id: "windows-smoke-invalid", method: "inspectWindow", params: { windowId: "0" } }), (item) => item?.id === "windows-smoke-invalid");
   if (invalidWindow.ok || invalidWindow.error?.code !== "WINDOW_NOT_FOUND") throw new Error("Invalid window ID was not rejected correctly.");
 
+  const selfTest = await request("selfTest", {});
+  if (!selfTest.ok || selfTest.monitorCount < 1 || !Array.isArray(selfTest.monitors)) {
+    throw new Error(`The native self-test did not pass: ${selfTest.detail ?? "unknown failure"}`);
+  }
+  for (const capability of ["uiAutomationAvailable", "windowEnumerationAvailable", "screenEnumerationAvailable", "screenshotAvailable", "dpiAvailable", "inputApisAvailable"]) {
+    if (selfTest[capability] !== true) throw new Error(`The native self-test reported ${capability}=false.`);
+  }
+
   const waited = await request("wait", { milliseconds: 50 });
   if (!waited.ok || waited.waitedMs !== 50) throw new Error("wait did not return its structured result.");
 
@@ -112,7 +120,7 @@ try {
   const termination = await exit;
   if (termination.code !== 0) throw new Error(`The Windows sidecar did not shut down cleanly (${termination.code ?? termination.signal ?? "unknown"}).`);
   settled = true;
-  process.stdout.write(`${JSON.stringify({ sidecar, protocol: "PASS", windows: windows.windows.length, malformed: "PASS", unknownMethod: "PASS", invalidWindow: "PASS", wait: "PASS", cancellation: "PASS", reuseAfterCancellation: "PASS", gracefulShutdown: "PASS" })}\n`);
+  process.stdout.write(`${JSON.stringify({ sidecar, protocol: "PASS", windows: windows.windows.length, selfTest: "PASS", monitorCount: selfTest.monitorCount, malformed: "PASS", unknownMethod: "PASS", invalidWindow: "PASS", wait: "PASS", cancellation: "PASS", reuseAfterCancellation: "PASS", gracefulShutdown: "PASS" })}\n`);
 } finally {
   if (!settled) {
     settled = true;

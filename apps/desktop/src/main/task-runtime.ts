@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { ComputerUseAgent } from "@openuse/agent";
-import { GatewayModelProvider } from "@openuse/ai";
+import { GatewayModelProvider, getModelCapabilities } from "@openuse/ai";
 import { NativeComputerController } from "@openuse/computer";
 import {
   InMemoryPermissionStore,
@@ -27,6 +27,7 @@ interface TaskRuntimeOptions {
   engine: NativeEngineProcess;
   readApiKey: () => Promise<string | undefined>;
   emit: (event: RuntimeEvent) => void;
+  qualificationMode?: boolean;
 }
 
 interface ActiveTask {
@@ -86,7 +87,7 @@ export class TaskRuntime {
     const startedAt = Date.now();
     let actionCount = 0;
     const modelId = this.options.settings.persisted.modelId;
-    this.options.emit({ type: "task.started", taskId, command, modelId, at: nowIso() });
+    this.options.emit({ type: "task.started", taskId, command, modelId, capabilities: getModelCapabilities(modelId), at: nowIso() });
     this.options.emit({ type: "engine.status", status: this.options.engine.status, at: nowIso() });
 
     const prompt: PermissionPrompt = {
@@ -104,9 +105,13 @@ export class TaskRuntime {
       modelId,
       maxActions: 30,
       abortSignal: abort.signal,
+      qualificationMode: this.options.qualificationMode,
       onEvent: (event) => {
         if (event.type === "action.started") actionCount += 1;
         this.options.emit(event);
+        if (event.type === "action.completed" || event.type === "action.failed") {
+          this.options.emit({ type: "engine.status", status: this.options.engine.status, at: nowIso() });
+        }
       },
     }).then((result) => {
       this.options.emit({

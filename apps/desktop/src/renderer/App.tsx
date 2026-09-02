@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MODEL_CATALOG } from "@openuse/ai";
+import { MODEL_CATALOG, type GatewayConnectionResult } from "@openuse/ai";
 import { defaultPermissionRecords } from "@openuse/permissions";
 import type {
   AgentStatus,
   AppSettings,
+  EngineSelfTestResult,
   EngineStatus,
   PermissionDecision,
   PermissionLevel,
   PermissionRequest,
+  QualificationDebugSnapshot,
+  QualificationSessionInfo,
   RuntimeEvent,
   TimelineAction,
 } from "@openuse/shared";
@@ -35,6 +38,8 @@ const emptySettings: AppSettings = {
   permissions: [],
 };
 
+const emptyQualification: QualificationSessionInfo = { enabled: false };
+
 const browserPreviewBridge: Window["openuse"] = {
   getSnapshot: async () => ({
     settings: { ...emptySettings, permissions: defaultPermissionRecords() },
@@ -43,9 +48,11 @@ const browserPreviewBridge: Window["openuse"] = {
       state: "unsupported",
       detail: "OpenUse's desktop bridge is available inside Electron only. Open the desktop app to control Windows.",
     },
+    qualification: emptyQualification,
   }),
   setModel: async () => undefined,
   saveGatewayApiKey: async () => { throw new Error("Settings are available in the OpenUse desktop app."); },
+  testGatewayConnection: async () => { throw new Error("Settings are available in the OpenUse desktop app."); },
   startTask: async () => { throw new Error("Computer control is available in the OpenUse desktop app."); },
   stopTask: async () => undefined,
   decidePermission: async () => undefined,
@@ -58,6 +65,9 @@ const runtimeApi = window.openuse ?? browserPreviewBridge;
 export function App() {
   const [settings, setSettings] = useState<AppSettings>(emptySettings);
   const [engine, setEngine] = useState<EngineStatus>(emptyEngine);
+  const [qualification, setQualification] = useState<QualificationSessionInfo>(emptyQualification);
+  const [debugSnapshot, setDebugSnapshot] = useState<QualificationDebugSnapshot | undefined>();
+  const [selfTest, setSelfTest] = useState<EngineSelfTestResult | undefined>();
   const [entries, setEntries] = useState<TimelineEntry[]>([]);
   const [command, setCommand] = useState("");
   const [status, setStatus] = useState<AgentStatus>("idle");
@@ -67,12 +77,15 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [error, setError] = useState<string | undefined>();
+  const [connectionTest, setConnectionTest] = useState<ConnectionTestState>("idle");
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     void runtimeApi.getSnapshot().then((snapshot) => {
       setSettings(snapshot.settings);
       setEngine(snapshot.engine);
+      setQualification(snapshot.qualification);
+      setSelfTest(snapshot.qualification.selfTest);
     }).catch(() => setError("OpenUse could not load its local settings."));
     return runtimeApi.onEvent((event) => handleRuntimeEvent(event, {
       setEntries,
@@ -82,6 +95,9 @@ export function App() {
       setPermission,
       setEngine,
       setError,
+      setQualification,
+      setDebugSnapshot,
+      setSelfTest,
     }));
   }, []);
 
@@ -96,14 +112,15 @@ export function App() {
   );
   const modelCompatible = activeModel.capabilities.toolCalling && activeModel.capabilities.vision;
   const isRunning = status === "running";
-  const canRun = Boolean(command.trim()) && !isRunning && settings.apiKeyConfigured && modelCompatible && engine.state === "ready";
+  const engineCanStart = engine.state === "ready" || engine.canStart === true;
+  const canRun = Boolean(command.trim()) && !isRunning && settings.apiKeyConfigured && modelCompatible && engineCanStart;
 
   async function runTask() {
     if (!canRun) {
       if (!settings.apiKeyConfigured) {
         setSettingsOpen(true);
         setError("Add your AI Gateway API key in Settings to run a task.");
-      } else if (engine.state !== "ready") {
+      } else if (!engineCanStart) {
         setError("The Windows engine is not available on this host.");
       } else if (!modelCompatible) {
         setError("Choose a model with both tool calling and vision support for Computer Use.");
@@ -134,9 +151,24 @@ export function App() {
       setEngine(snapshot.engine);
       setApiKeyDraft("");
       setSettingsOpen(false);
+      setConnectionTest("idle");
       setError(undefined);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Settings could not be saved.");
+    }
+  }
+
+  async function testConnection(modelId: string) {
+    setConnectionTest("testing");
+    try {
+      if (apiKeyDraft.trim()) await runtimeApi.saveGatewayApiKey(apiKeyDraft.trim());
+      const result = await runtimeApi.testGatewayConnection(modelId);
+      setConnectionTest(result);
+      const snapshot = await runtimeApi.getSnapshot();
+      setSettings(snapshot.settings);
+      setEngine(snapshot.engine);
+    } catch (caught) {
+      setConnectionTest({ ok: false, code: "GATEWAY_ERROR", message: caught instanceof Error ? caught.message : "The Gateway connection test failed." });
     }
   }
 
@@ -297,6 +329,7 @@ export function App() {
                 <div className={`model-compatibility ${modelCompatible ? "compatible" : "incompatible"}`}>{modelCompatible ? "Ready for Computer Use" : "Not compatible with Computer Use"}</div>
                 <div className="capability-checks"><span className={activeModel.capabilities.toolCalling ? "" : "capability-missing"}><Glyph name={activeModel.capabilities.toolCalling ? "check" : "alert"} />Tool calling</span><span className={activeModel.capabilities.vision ? "" : "capability-missing"}><Glyph name={activeModel.capabilities.vision ? "check" : "alert"} />Vision</span></div>
               </section>
+              {qualification.enabled && <QualificationPanel engine={engine} debug={debugSnapshot} selfTest={selfTest} />}
             </aside>
           </div>
         </div>
@@ -315,7 +348,9 @@ export function App() {
         onApiKeyChange={setApiKeyDraft}
         onClose={() => setSettingsOpen(false)}
         onSave={(modelId) => void saveSettings(modelId, apiKeyDraft)}
-        onPermissionChange={(appName, level) => void updatePermission(appName, level)}
+        onTestConnection={(modelId) => void testConnection(modelId)}
+        connectionTest={connectionTest}
+        onPermissionChange={(appName, level, appIdentity) => void updatePermission(appName, level, appIdentity)}
       />}
     </div>
   );
@@ -331,6 +366,9 @@ function handleRuntimeEvent(
     setPermission: React.Dispatch<React.SetStateAction<PermissionRequest | undefined>>;
     setEngine: React.Dispatch<React.SetStateAction<EngineStatus>>;
     setError: React.Dispatch<React.SetStateAction<string | undefined>>;
+    setQualification: React.Dispatch<React.SetStateAction<QualificationSessionInfo>>;
+    setDebugSnapshot: React.Dispatch<React.SetStateAction<QualificationDebugSnapshot | undefined>>;
+    setSelfTest: React.Dispatch<React.SetStateAction<EngineSelfTestResult | undefined>>;
   },
 ) {
   switch (event.type) {
@@ -353,12 +391,12 @@ function handleRuntimeEvent(
       break;
     case "action.completed":
       setters.setEntries((current) => current.map((entry) => entry.kind === "action" && entry.action.actionId === event.actionId
-        ? { ...entry, action: { ...entry.action, status: "completed", durationMs: event.durationMs, detail: event.detail } }
+        ? { ...entry, action: { ...entry.action, status: "completed", durationMs: event.durationMs, detail: event.detail, ...event.telemetry } }
         : entry));
       break;
     case "action.failed":
       setters.setEntries((current) => current.map((entry) => entry.kind === "action" && entry.action.actionId === event.actionId
-        ? { ...entry, action: { ...entry.action, status: "failed", errorCode: event.code, errorMessage: event.message } }
+        ? { ...entry, action: { ...entry.action, status: "failed", durationMs: event.durationMs, errorCode: event.code, errorMessage: event.message, ...event.telemetry } }
         : entry));
       break;
     case "task.finished":
@@ -367,6 +405,12 @@ function handleRuntimeEvent(
       break;
     case "engine.status":
       setters.setEngine(event.status);
+      break;
+    case "qualification.debug":
+      setters.setDebugSnapshot(event.debug);
+      break;
+    case "qualification.self-test":
+      setters.setSelfTest(event.result);
       break;
   }
 }
@@ -428,6 +472,8 @@ function SettingsDialog({
   onApiKeyChange,
   onClose,
   onSave,
+  onTestConnection,
+  connectionTest,
   onPermissionChange,
 }: {
   settings: AppSettings;
@@ -435,6 +481,8 @@ function SettingsDialog({
   onApiKeyChange(value: string): void;
   onClose(): void;
   onSave(modelId: string): void;
+  onTestConnection(modelId: string): void;
+  connectionTest: ConnectionTestState;
   onPermissionChange(appName: string, level: PermissionLevel, appIdentity?: string): void;
 }) {
   const [modelId, setModelId] = useState(settings.modelId);
@@ -452,12 +500,45 @@ function SettingsDialog({
       <div className="settings-field"><label htmlFor="provider">AI provider</label><div className="field-readonly" id="provider">Vercel AI Gateway <span className="configured-tag">Connected by key</span></div></div>
       <div className="settings-field"><label htmlFor="settings-model">Model</label><div className="select-wrap"><select id="settings-model" value={modelId} onChange={(event) => setModelId(event.target.value)}>{MODEL_CATALOG.map((model) => <option value={model.id} key={model.id}>{model.label}</option>)}</select><Glyph name="chevron" /></div><div className="field-note">Computer Use requires tool calling and vision.</div></div>
       <div className="settings-field"><label htmlFor="gateway-key">API key</label><input id="gateway-key" type="password" autoComplete="off" value={apiKeyDraft} onChange={(event) => onApiKeyChange(event.target.value)} placeholder={settings.apiKeyConfigured ? "Key saved — enter a new key to replace it" : "Paste your AI_GATEWAY_API_KEY"} /><div className="field-note"><Glyph name="lock" /> Stored locally with OS-backed encryption. Never returned to the renderer.</div></div>
+      <div className="connection-test"><button className="secondary-action" type="button" disabled={connectionTest === "testing"} onClick={() => onTestConnection(modelId)}>{connectionTest === "testing" ? "Testing…" : "Test connection"}</button>{connectionTest !== "idle" && connectionTest !== "testing" && <span className={connectionTest.ok ? "connection-success" : "connection-failure"}>{connectionTest.message}</span>}</div>
       <div className="settings-divider" />
       <div className="permissions-heading"><div><div className="dialog-eyebrow">Application permissions</div><h3>Who can OpenUse control?</h3></div><span className="permissions-count">{settings.permissions.length} rules</span></div>
       <div className="permission-list">{settings.permissions.map((record) => <div className="permission-row" key={record.appIdentity ?? record.appName}><div><div className="permission-app">{record.appName}</div><div className="permission-updated">{record.level === "ALLOW" ? "Control allowed" : record.level === "DENY" ? "Control blocked" : "Ask each time"}</div></div><div className="select-wrap permission-select"><select aria-label={`${record.appName} permission`} value={record.level} onChange={(event) => onPermissionChange(record.appName, event.target.value as PermissionLevel, record.appIdentity)}><option>ALLOW</option><option>ASK</option><option>DENY</option></select><Glyph name="chevron" /></div></div>)}</div>
       <div className="dialog-footer"><span className="settings-status">{settings.apiKeyConfigured ? <><span className="status-dot status-ready" />Gateway key configured</> : <><span className="status-dot status-offline" />Gateway key needed</>}</span><button className="primary-action" type="button" onClick={() => onSave(modelId)}>Save settings</button></div>
     </div>
   </div>;
+}
+
+type ConnectionTestState = "idle" | "testing" | GatewayConnectionResult;
+
+function QualificationPanel({ engine, debug, selfTest }: { engine: EngineStatus; debug?: QualificationDebugSnapshot; selfTest?: EngineSelfTestResult }) {
+  return <section className="inspector-section qualification-section">
+    <div className="section-heading"><span className="section-icon"><Glyph name="tool" /></span><span>Qualification mode</span></div>
+    <div className="qualification-status"><span className={`status-dot status-${engine.state}`} />Windows controller <strong>{engine.state === "ready" ? "Connected" : engine.state === "offline" ? "Offline" : engine.state}</strong></div>
+    <div className="qualification-grid">
+      <span>PID</span><strong>{engine.pid ?? "—"}</strong>
+      <span>Protocol</span><strong>{engine.protocol ?? "—"}</strong>
+      <span>Heartbeat</span><strong>{engine.lastHeartbeatAt ? formatTimestamp(engine.lastHeartbeatAt) : "—"}</strong>
+      <span>Last action</span><strong>{engine.lastAction ?? "—"}</strong>
+    </div>
+    {selfTest && <><div className={`self-test-result ${selfTest.ok ? "self-test-pass" : "self-test-fail"}`}><span>{selfTest.ok ? "Self-test passed" : "Self-test failed"}</span><span>{selfTest.monitorCount} monitor{selfTest.monitorCount === 1 ? "" : "s"}</span></div><div className="self-test-details">{selfTest.monitors.map((monitor) => <span key={monitor.index}>Display {monitor.index + 1}: {monitor.dpi} DPI · {monitor.bounds.width}×{monitor.bounds.height} at ({monitor.bounds.x}, {monitor.bounds.y})</span>)}{selfTest.screenshot && <span>Capture: {selfTest.screenshot.width}×{selfTest.screenshot.height} · origin ({selfTest.screenshot.captureBounds.x}, {selfTest.screenshot.captureBounds.y})</span>}</div></>}
+    {debug && <>
+      <div className="debug-rule" />
+      <div className="debug-label">Last runtime observation</div>
+      <div className="debug-summary"><strong>{debug.tool}</strong><span>{debug.result} · action {debug.actionCount} · retry {debug.retryCount}</span></div>
+      <div className="debug-summary"><span>Method</span><strong>{debug.interactionMethod ?? "not an interaction"}</strong></div>
+      {debug.targetElementId && <div className="debug-summary"><span>Element</span><strong>{debug.targetElementId}</strong></div>}
+      {debug.window && <div className="debug-window"><strong>{debug.window.title || debug.window.app}</strong><span>{debug.window.app} · {debug.window.bounds.width}×{debug.window.bounds.height} at ({debug.window.bounds.x}, {debug.window.bounds.y})</span></div>}
+      {debug.screenshot && <div className="debug-window"><strong>Screenshot</strong><span>{debug.screenshot.width}×{debug.screenshot.height} px · origin ({debug.screenshot.originX}, {debug.screenshot.originY}) · {debug.screenshot.dpi} DPI</span></div>}
+      <div className="debug-label">Normalized elements ({debug.elements.length}{debug.truncated ? "+" : ""})</div>
+      <div className="debug-elements" role="region" aria-label="Normalized UI Automation elements">{debug.elements.slice(0, 40).map((element) => <div className="debug-element" key={element.id}><strong>{element.id}</strong><span>{element.role} · {element.name || "(unnamed)"}</span><small>{element.automationId || element.className || "—"} · {element.bounds.x},{element.bounds.y} {element.bounds.width}×{element.bounds.height}</small>{element.value && <small>value: {element.value}</small>}</div>)}</div>
+    </>}
+    {!debug && <p className="qualification-note">Start a task to inspect the normalized UI state and actual interaction method here. Pixels are never persisted by default.</p>}
+  </section>;
+}
+
+function formatTimestamp(value: string): string {
+  return value.replace("T", " ").replace("Z", " UTC");
 }
 
 function statusLabel(status: AgentStatus): string {

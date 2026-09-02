@@ -54,6 +54,59 @@ export interface ModelProvider {
   generateAgentStep(options: AgentStepOptions): Promise<AgentStepResult>;
 }
 
+export type GatewayConnectionErrorCode = "INVALID_API_KEY" | "NETWORK_ERROR" | "MODEL_UNSUPPORTED" | "GATEWAY_ERROR";
+
+export type GatewayConnectionResult =
+  | { ok: true; modelId: string; message: string }
+  | { ok: false; code: GatewayConnectionErrorCode; message: string };
+
+export async function testGatewayConnection(
+  readApiKey: () => Promise<string | undefined>,
+  modelId: string,
+  abortSignal?: AbortSignal,
+): Promise<GatewayConnectionResult> {
+  const model = getModelDefinition(modelId);
+  if (!model || !model.capabilities.toolCalling || !model.capabilities.vision) {
+    return { ok: false, code: "MODEL_UNSUPPORTED", message: "The selected model is not marked as supporting Computer Use tool calling and vision." };
+  }
+  const apiKey = await readApiKey();
+  if (!apiKey) return { ok: false, code: "INVALID_API_KEY", message: "Add an AI Gateway API key before testing the connection." };
+
+  try {
+    const gateway = createGateway({ apiKey });
+    await generateText({
+      model: gateway(modelId),
+      prompt: "Reply with the single word OK.",
+      maxOutputTokens: 4,
+      maxRetries: 0,
+      abortSignal,
+    });
+    return { ok: true, modelId, message: "The AI Gateway connection is working." };
+  } catch (error) {
+    return classifyGatewayConnectionError(error);
+  }
+}
+
+function classifyGatewayConnectionError(error: unknown): GatewayConnectionResult {
+  const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const status = typeof record.statusCode === "number"
+    ? record.statusCode
+    : typeof record.status === "number"
+      ? record.status
+      : undefined;
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (status === 404 || /model.+(not found|unsupported|does not exist)|unknown model/.test(message)) {
+    return { ok: false, code: "MODEL_UNSUPPORTED", message: "The selected model is not available through the AI Gateway." };
+  }
+  if (status === 401 || status === 403 || /unauthorized|forbidden|invalid.+(key|token)|api key/.test(message)) {
+    return { ok: false, code: "INVALID_API_KEY", message: "The AI Gateway rejected the API key." };
+  }
+  if (/enotfound|econnrefused|etimedout|econnreset|enetunreach|network|fetch failed|offline/.test(message)) {
+    return { ok: false, code: "NETWORK_ERROR", message: "OpenUse could not reach the AI Gateway. Check the network connection." };
+  }
+  return { ok: false, code: "GATEWAY_ERROR", message: "The AI Gateway returned an error while testing the connection." };
+}
+
 export class GatewayModelProvider implements ModelProvider {
   readonly id = "vercel-gateway";
   readonly displayName = "Vercel AI Gateway";

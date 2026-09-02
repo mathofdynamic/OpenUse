@@ -1,20 +1,23 @@
 import { app, BrowserWindow, ipcMain, safeStorage } from "electron";
 import { join } from "node:path";
 import { z } from "zod";
-import type { PermissionDecision, PermissionLevel } from "@openuse/shared";
-import { OpenUseError, type AppSnapshot } from "@openuse/shared";
-import { MODEL_CATALOG } from "@openuse/ai";
+import type { PermissionDecision, PermissionLevel, RuntimeEvent } from "@openuse/shared";
+import { OpenUseError, nowIso, type AppSnapshot, type EngineSelfTestResult } from "@openuse/shared";
+import { MODEL_CATALOG, testGatewayConnection } from "@openuse/ai";
 import { GatewaySecretStore } from "./secure-store";
 import { SettingsStore } from "./settings-store";
 import { NativeEngineProcess } from "./native-process";
 import { TaskRuntime } from "./task-runtime";
 import { logRuntimeEvent } from "./runtime-logger";
+import { QualificationRecorder } from "./qualification-recorder";
 
 let mainWindow: BrowserWindow | undefined;
 let settings: SettingsStore;
 let secrets: GatewaySecretStore;
 let engine: NativeEngineProcess;
 let runtime: TaskRuntime;
+let qualification: QualificationRecorder;
+let qualificationSelfTest: EngineSelfTestResult | undefined;
 let isQuitting = false;
 
 const modelSchema = z.object({ modelId: z.string().min(1).max(160) });
@@ -38,6 +41,7 @@ function publicSnapshot(): Promise<AppSnapshot> {
   return secrets.isConfigured().then((apiKeyConfigured) => ({
     settings: runtime.settings(apiKeyConfigured),
     engine: engine.status,
+    qualification: { enabled: qualification.enabled, runId: qualification.runId, selfTest: qualificationSelfTest },
   }));
 }
 
@@ -56,6 +60,11 @@ function installIpc(): void {
     assertSender(event);
     const { apiKey } = keySchema.parse(raw);
     await secrets.write(apiKey);
+  });
+  ipcMain.handle("openuse:test-gateway", async (event, raw: unknown) => {
+    assertSender(event);
+    const { modelId } = modelSchema.parse(raw);
+    return testGatewayConnection(() => secrets.read(), modelId);
   });
   ipcMain.handle("openuse:start-task", async (event, raw: unknown) => {
     assertSender(event);
@@ -103,6 +112,11 @@ async function bootstrap(): Promise<void> {
   settings = new SettingsStore(join(app.getPath("userData"), "settings.json"));
   await settings.initialize();
   secrets = new GatewaySecretStore(join(app.getPath("userData"), "secrets.json"), safeStorage);
+  qualification = new QualificationRecorder({
+    enabled: process.env.OPENUSE_QUALIFICATION_MODE === "1",
+    directory: process.env.OPENUSE_QUALIFICATION_DIR,
+    runId: process.env.OPENUSE_QUALIFICATION_RUN_ID,
+  });
   engine = new NativeEngineProcess({
     platform: process.platform,
     isPackaged: app.isPackaged,
@@ -114,12 +128,44 @@ async function bootstrap(): Promise<void> {
     engine,
     readApiKey: () => secrets.read(),
     emit: (event) => {
+      qualification.record(event);
       logRuntimeEvent(event, !app.isPackaged);
       mainWindow?.webContents.send("openuse:event", event);
     },
+    qualificationMode: qualification.enabled,
   });
   installIpc();
   createWindow();
+  if (qualification.enabled && process.platform === "win32") {
+    void engine.selfTest().then((result) => {
+      qualificationSelfTest = result;
+      const event: RuntimeEvent = { type: "qualification.self-test", result, at: nowIso() };
+      qualification.recordSelfTest(result);
+      logRuntimeEvent(event, true);
+      mainWindow?.webContents.send("openuse:event", event);
+      const statusEvent: RuntimeEvent = { type: "engine.status", status: engine.status, at: nowIso() };
+      qualification.record(statusEvent);
+      mainWindow?.webContents.send("openuse:event", statusEvent);
+    }).catch((error) => {
+      const result: EngineSelfTestResult = {
+        ok: false,
+        uiAutomationAvailable: false,
+        windowEnumerationAvailable: false,
+        screenEnumerationAvailable: false,
+        screenshotAvailable: false,
+        dpiAvailable: false,
+        inputApisAvailable: false,
+        monitorCount: 0,
+        monitors: [],
+        detail: error instanceof Error ? error.message : "The native self-test failed.",
+      };
+      qualificationSelfTest = result;
+      const event: RuntimeEvent = { type: "qualification.self-test", result, at: nowIso() };
+      qualification.recordSelfTest(result);
+      logRuntimeEvent(event, true);
+      mainWindow?.webContents.send("openuse:event", event);
+    });
+  }
 }
 
 void bootstrap().catch((error) => {

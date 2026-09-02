@@ -1,6 +1,6 @@
 # Reference research
 
-Research was performed against the public repositories on 2026-09-01.
+Research was performed against the public repositories on 2026-09-01; the Windows DPI API review was added on 2026-09-02.
 
 - T3 Code `b883fc066ea5c9bebbe1c3e9b4bc2471aab3685f` — MIT
 - OpenAI Codex `3a04482645b695085f4daf7c6310ab8592653fea` — Apache-2.0
@@ -39,3 +39,9 @@ References: [Gateway provider](https://github.com/vercel/ai/blob/main/content/pr
 3. Use a manual AI SDK loop with `generateText`, one step at a time, with a 30-tool-call cap.
 4. Make permissions and high-risk approval runtime-owned; the model never supplies an authoritative risk classification.
 5. Keep the public app independent of T3 Code and Codex source and preserve research-only attribution.
+
+## Windows DPI implementation note
+
+The native sidecar sets `HighDpiMode.PerMonitorV2` at process startup and uses `GetDpiForWindow` for per-monitor diagnostics. Microsoft documents `GetDpiForMonitor` as unsuitable for a per-monitor-aware caller, so it is not used. Window captures report the target window DPI; full virtual-screen captures retain physical capture bounds and dimensions for the image-to-desktop mapping.
+
+References: [GetDpiForMonitor](https://learn.microsoft.com/en-us/windows/win32/api/shellscalingapi/nf-shellscalingapi-getdpiformonitor), [GetDpiForWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getdpiforwindow), and [.NET HighDpiMode](https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.highdpimode?view=windowsdesktop-10.0).

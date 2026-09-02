@@ -17,3 +17,4 @@ native/windows.tests/obj/
 __MACOSX/
 .ocd-designer/runs/*/evidence/artifacts/*
 !.ocd-designer/runs/*/evidence/artifacts/.gitkeep
+.openuse/qualification/

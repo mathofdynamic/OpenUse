@@ -89,7 +89,7 @@ export interface RiskContext {
 
 const DESTRUCTIVE_WORDS = /\b(delete|remove|uninstall|format|erase|empty|discard|overwrite)\b/i;
 const EXTERNAL_SUBMISSION_WORDS = /\b(submit|send|purchase|buy|checkout|install|grant|allow access|change permission)\b/i;
-const CREDENTIAL_WORDS = /\b(password|passcode|credential|secret|security code|one[- ]time code|otp)\b/i;
+const CREDENTIAL_WORDS = /\b(password|passcode|credential|secret|security code|one[- ]time code|otp)(?:\b|box|field)/i;
 const SYSTEM_SETTINGS_WORDS = /\b(settings|control panel|registry|regedit|device manager)\b/i;
 const CREDENTIAL_APP_WORDS = /(?:password manager|1password|bitwarden|lastpass|keepass|dashlane)/i;
 

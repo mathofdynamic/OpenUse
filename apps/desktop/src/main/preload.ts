@@ -1,10 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { GatewayConnectionResult } from "@openuse/ai";
 import type { AppSnapshot, PermissionDecision, PermissionLevel, RuntimeEvent } from "@openuse/shared";
 
 const api = {
   getSnapshot: (): Promise<AppSnapshot> => ipcRenderer.invoke("openuse:get-snapshot"),
   setModel: (modelId: string): Promise<void> => ipcRenderer.invoke("openuse:set-model", { modelId }),
   saveGatewayApiKey: (apiKey: string): Promise<void> => ipcRenderer.invoke("openuse:save-gateway-key", { apiKey }),
+  testGatewayConnection: (modelId: string): Promise<GatewayConnectionResult> => ipcRenderer.invoke("openuse:test-gateway", { modelId }),
   startTask: (command: string): Promise<void> => ipcRenderer.invoke("openuse:start-task", { command }),
   stopTask: (): Promise<void> => ipcRenderer.invoke("openuse:stop-task"),
   decidePermission: (id: string, decision: PermissionDecision): Promise<void> =>

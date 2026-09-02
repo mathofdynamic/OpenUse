@@ -11,9 +11,10 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --exclude '**/._*'"
   },
   "dependencies": {
+    "@openuse/shared": "workspace:*",
     "zod": "^3.25.76"
   },
   "devDependencies": {

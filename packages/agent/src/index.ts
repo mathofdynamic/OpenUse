@@ -19,6 +19,12 @@ import {
   nowIso,
   redactText,
   type ActionRisk,
+  type ActionTelemetry,
+  type InteractionMethod,
+  type QualificationDebugSnapshot,
+  type QualificationElementSnapshot,
+  type QualificationScreenshotSnapshot,
+  type QualificationWindowSnapshot,
   type RuntimeEvent,
 } from "@openuse/shared";
 import type { AgentStepResult, ModelProvider } from "@openuse/ai";
@@ -169,6 +175,7 @@ export interface AgentRunOptions {
   maxActions?: number;
   abortSignal: AbortSignal;
   onEvent: (event: RuntimeEvent) => void;
+  qualificationMode?: boolean;
 }
 
 export interface AgentRunResult {
@@ -187,6 +194,13 @@ type ContentToolOutput = {
   >;
 };
 type ToolOutput = JsonToolOutput | ContentToolOutput;
+
+interface ToolExecution {
+  output: ToolOutput;
+  telemetry?: Omit<ActionTelemetry, "retryCount">;
+  observation?: WindowInspection;
+  screenshot?: Screenshot;
+}
 
 function jsonOutput(value: unknown): JsonToolOutput {
   return { type: "json", value };
@@ -216,6 +230,8 @@ function operationValue(operation: OperationResult, after?: WindowInspection) {
     changed: operation.changed,
     detail: operation.detail,
     window: operation.window,
+    interactionMethod: operation.interactionMethod,
+    targetElementId: operation.targetElementId,
     after: after
       ? {
           window: after.window,
@@ -248,6 +264,8 @@ export class ComputerUseAgent {
     let actionCount = 0;
     let step = 0;
     const failureCounts = new Map<string, number>();
+    let lastInspection: WindowInspection | undefined;
+    let lastScreenshot: Screenshot | undefined;
     let messages: ModelMessage[] = [{ role: "user", content: options.command }];
     const capabilities = this.provider.getCapabilities(options.modelId);
     if (!capabilities.toolCalling || !capabilities.vision) {
@@ -314,6 +332,9 @@ export class ComputerUseAgent {
         const toolName = toolCall.toolName as ComputerToolName;
         const inputResult = schemas[toolName]?.safeParse(toolCall.input);
         const rawInput = inputResult?.success ? inputResult.data : undefined;
+        const failureKey = `${toolName}:${failureSignature(inputResult?.success ? inputResult.data : toolCall.input)}`;
+        const retryCount = failureCounts.get(failureKey) ?? 0;
+        const targetContext = targetTelemetry(toolName, rawInput, lastInspection);
         const summary = actionSummary(toolName, rawInput);
         options.onEvent({
           type: "action.started",
@@ -323,6 +344,8 @@ export class ComputerUseAgent {
             tool: toolName,
             summary,
             status: "running",
+            ...targetContext,
+            retryCount,
           },
           at: nowIso(),
         });
@@ -331,22 +354,56 @@ export class ComputerUseAgent {
           if (!inputResult?.success) {
             throw new OpenUseError("INVALID_TOOL_INPUT", `The ${toolName} input did not pass validation.`);
           }
-          const result = await this.executeTool(
+          const screenshotBeforeAction = lastScreenshot;
+          const execution = await this.executeTool(
             toolName,
             inputResult.data as ComputerToolInput[typeof toolName],
             options,
+            lastScreenshot,
           );
-          failureCounts.delete(`${toolName}:${failureSignature(inputResult.data)}`);
+          lastInspection = execution.observation ?? lastInspection;
+          if (execution.screenshot) lastScreenshot = execution.screenshot;
+          else if (!isReadOnlyTool(toolName)) lastScreenshot = undefined;
+          failureCounts.delete(failureKey);
           const durationMs = Date.now() - actionStartedAt;
+          const telemetry = execution.telemetry
+            ? { ...execution.telemetry, retryCount }
+            : undefined;
+          const detail = detailForTimeline(toolName, execution.output);
           options.onEvent({
             type: "action.completed",
             taskId: options.taskId,
             actionId,
             durationMs,
-            detail: detailForTimeline(toolName, result),
+            detail,
+            telemetry,
             at: nowIso(),
           });
-          messages.push(toolMessage(toolCall.toolCallId, toolName, result));
+          this.emitDebug(options, {
+            taskId: options.taskId,
+            step,
+            actionCount,
+            tool: toolName,
+            retryCount,
+            result: "success",
+            interactionMethod: telemetry?.interactionMethod,
+            targetApp: telemetry?.targetApp,
+            targetWindowId: telemetry?.targetWindowId,
+            targetWindowTitle: telemetry?.targetWindowTitle,
+            targetElementId: telemetry?.targetElementId,
+            window: (execution.observation?.window ?? lastInspection?.window)
+              ? qualificationWindow(execution.observation?.window ?? lastInspection!.window)
+              : undefined,
+            elements: (execution.observation?.elements ?? lastInspection?.elements ?? []).slice(0, 160).map(qualificationElement),
+            truncated: execution.observation?.truncated ?? lastInspection?.truncated,
+            screenshot: execution.screenshot
+              ? screenshotDebug(execution.screenshot)
+              : screenshotBeforeAction
+                ? screenshotDebug(screenshotBeforeAction)
+                : undefined,
+            detail,
+          });
+          messages.push(toolMessage(toolCall.toolCallId, toolName, execution.output));
           if (toolName === "computer_finish") {
             const summaryInput = inputResult.data as ComputerToolInput["computer_finish"];
             finished = { status: "completed", summary: summaryInput.summary, actionCount };
@@ -355,18 +412,38 @@ export class ComputerUseAgent {
         } catch (error) {
           const openUseError = asOpenUseError(error, "UNSUPPORTED_ACTION");
           const durationMs = Date.now() - actionStartedAt;
+          const telemetry: ActionTelemetry = { ...targetContext, retryCount };
           options.onEvent({
             type: "action.failed",
             taskId: options.taskId,
             actionId,
             code: openUseError.code,
             message: openUseError.message,
+            durationMs,
+            telemetry,
             at: nowIso(),
+          });
+          this.emitDebug(options, {
+            taskId: options.taskId,
+            step,
+            actionCount,
+            tool: toolName,
+            retryCount,
+            result: "failure",
+            errorCode: openUseError.code,
+            targetApp: targetContext.targetApp,
+            targetWindowId: targetContext.targetWindowId,
+            targetWindowTitle: targetContext.targetWindowTitle,
+            targetElementId: targetContext.targetElementId,
+            window: lastInspection?.window ? qualificationWindow(lastInspection.window) : undefined,
+            elements: (lastInspection?.elements ?? []).slice(0, 160).map(qualificationElement),
+            truncated: lastInspection?.truncated,
+            screenshot: lastScreenshot ? screenshotDebug(lastScreenshot) : undefined,
+            detail: openUseError.message,
           });
           if (["TASK_CANCELLED", "NATIVE_ENGINE_OFFLINE", "MODEL_UNSUPPORTED", "APP_NOT_ALLOWED", "USER_DENIED", "CREDENTIAL_INTERACTION_DISABLED"].includes(openUseError.code)) {
             throw openUseError;
           }
-          const failureKey = `${toolName}:${failureSignature(inputResult?.success ? inputResult.data : toolCall.input)}`;
           const failureCount = (failureCounts.get(failureKey) ?? 0) + 1;
           failureCounts.set(failureKey, failureCount);
           if (failureCount >= 2 && ["STALE_UI_STATE", "ELEMENT_NOT_FOUND", "WINDOW_NOT_FOUND"].includes(openUseError.code)) {
@@ -415,6 +492,11 @@ export class ComputerUseAgent {
     if (signal.aborted) throw new OpenUseError("TASK_CANCELLED", "The task was stopped.");
   }
 
+  private emitDebug(options: AgentRunOptions, debug: QualificationDebugSnapshot): void {
+    if (!options.qualificationMode) return;
+    options.onEvent({ type: "qualification.debug", debug, at: nowIso() });
+  }
+
   private async resolveWindow(windowId: string, signal: AbortSignal): Promise<WindowInfo> {
     const { windows } = await this.computer.listWindows(signal);
     return windowForId(windows, windowId);
@@ -458,17 +540,18 @@ export class ComputerUseAgent {
     toolName: N,
     input: ComputerToolInput[N],
     options: AgentRunOptions,
-  ): Promise<ToolOutput> {
+    lastScreenshot?: Screenshot,
+  ): Promise<ToolExecution> {
     const signal = options.abortSignal;
     this.checkCancelled(signal);
     switch (toolName) {
       case "computer_list_apps": {
         const result = await this.computer.listApps(signal);
-        return jsonOutput({ ok: true, apps: result.apps });
+        return { output: jsonOutput({ ok: true, apps: result.apps }) };
       }
       case "computer_list_windows": {
         const result = await this.computer.listWindows(signal);
-        return jsonOutput({ ok: true, windows: result.windows });
+        return { output: jsonOutput({ ok: true, windows: result.windows }) };
       }
       case "computer_inspect_window": {
         const typed = input as ComputerToolInput["computer_inspect_window"];
@@ -476,7 +559,10 @@ export class ComputerUseAgent {
         const risk = classifyActionRisk(toolName, { appName: window.app });
         await this.authorize(options, toolName, window.app, window.appIdentity, `Inspect ${window.title || window.app}`, risk, "OpenUse is reading a bounded accessibility view of this application.");
         const result = await this.computer.inspectWindow(typed.windowId, signal);
-        return jsonOutput({ ok: true, window: result.window, elements: result.elements, truncated: result.truncated });
+        return {
+          output: jsonOutput({ ok: true, window: result.window, elements: result.elements, truncated: result.truncated }),
+          observation: result,
+        };
       }
       case "computer_capture_screen": {
         const typed = input as ComputerToolInput["computer_capture_screen"];
@@ -486,7 +572,10 @@ export class ComputerUseAgent {
         const risk = classifyActionRisk(toolName, { appName });
         await this.authorize(options, toolName, appName, appIdentity, "Capture one screen observation", risk, "A screenshot will be sent to the selected model.");
         const screenshot = await this.computer.captureScreen(typed.windowId, signal);
-        return screenshotOutput(screenshot, `Captured a reduced ${screenshot.width}×${screenshot.height} screen image.`);
+        return {
+          output: screenshotOutput(screenshot, `Captured a reduced ${screenshot.width}×${screenshot.height} screen image.`),
+          screenshot,
+        };
       }
       case "computer_launch_app": {
         const typed = input as ComputerToolInput["computer_launch_app"];
@@ -497,7 +586,10 @@ export class ComputerUseAgent {
         const windows = await this.computer.listWindows(signal);
         const matching = windows.windows.find((window) => appMatches(window.app, typed.app));
         const after = matching ? await this.inspectAfter(matching.id, signal) : undefined;
-        return jsonOutput({ ok: true, app: typed.app, windows: windows.windows, openedWindow: after?.window ?? matching, inspection: after });
+        return {
+          output: jsonOutput({ ok: true, app: typed.app, windows: windows.windows, openedWindow: after?.window ?? matching, inspection: after }),
+          observation: after,
+        };
       }
       case "computer_focus_window": {
         const typed = input as ComputerToolInput["computer_focus_window"];
@@ -506,7 +598,11 @@ export class ComputerUseAgent {
         await this.authorize(options, toolName, window.app, window.appIdentity, `Focus ${window.title || window.app}`, risk, "OpenUse is bringing this application to the foreground.");
         const result = await this.computer.focusWindow(typed.windowId, signal);
         const after = await this.inspectAfter(typed.windowId, signal);
-        return jsonOutput(operationValue(result, after));
+        return {
+          output: jsonOutput(operationValue(result, after)),
+          observation: after,
+          telemetry: operationTelemetry(result, window, typed.windowId),
+        };
       }
       case "computer_click": {
         const typed = input as ComputerToolInput["computer_click"];
@@ -514,7 +610,10 @@ export class ComputerUseAgent {
         const risk = classifyActionRisk(toolName, { appName: focused.appName });
         await this.authorize(options, toolName, focused.appName, focused.appIdentity, `Click at ${typed.x}, ${typed.y}`, risk, "OpenUse is requesting a screen interaction.");
         const result = await this.computer.click(typed, signal);
-        return jsonOutput(operationValue(result));
+        return {
+          output: jsonOutput(operationValue(result)),
+          telemetry: operationTelemetry(result, undefined, undefined, lastScreenshot ? "vision-coordinate" : undefined, focused.appName),
+        };
       }
       case "computer_click_element": {
         const typed = input as ComputerToolInput["computer_click_element"];
@@ -530,7 +629,11 @@ export class ComputerUseAgent {
         await this.authorize(options, toolName, window.app, window.appIdentity, `Click ${selectedElement?.name || elementLabel(typed)}`, risk, risk === "interaction" ? "OpenUse is requesting a semantic UI interaction." : "This control may change or submit data.");
         const result = await this.computer.clickElement(typed, signal);
         const after = await this.inspectAfter(typed.windowId, signal);
-        return jsonOutput(operationValue(result, after));
+        return {
+          output: jsonOutput(operationValue(result, after)),
+          observation: after,
+          telemetry: operationTelemetry(result, window, typed.windowId, undefined, undefined, selectedElement?.id),
+        };
       }
       case "computer_double_click": {
         const typed = input as ComputerToolInput["computer_double_click"];
@@ -538,11 +641,14 @@ export class ComputerUseAgent {
         const risk = classifyActionRisk(toolName, { appName: focused.appName });
         await this.authorize(options, toolName, focused.appName, focused.appIdentity, `Double-click at ${typed.x}, ${typed.y}`, risk, "OpenUse is requesting a screen interaction.");
         const result = await this.computer.doubleClick(typed, signal);
-        return jsonOutput(operationValue(result));
+        return {
+          output: jsonOutput(operationValue(result)),
+          telemetry: operationTelemetry(result, undefined, undefined, lastScreenshot ? "vision-coordinate" : undefined, focused.appName),
+        };
       }
       case "computer_type_text": {
         const typed = input as ComputerToolInput["computer_type_text"];
-        if (isCredentialTarget(typed.role, typed.name)) {
+        if (isCredentialTarget(typed.role, [typed.name, typed.automationId, typed.className].filter(Boolean).join(" "))) {
           throw new OpenUseError("CREDENTIAL_INTERACTION_DISABLED", "Credential and password entry is disabled in this MVP.");
         }
         const window = typed.windowId ? await this.appForWindow(typed.windowId, signal) : undefined;
@@ -551,7 +657,7 @@ export class ComputerUseAgent {
           await this.authorize(options, toolName, window.app, window.appIdentity, `Inspect ${window.title || window.app}`, "read", "OpenUse is checking the target control before typing.");
           const inspection = await this.computer.inspectWindow(window.id, signal);
           selectedElement = findElement(inspection, typed);
-          if (selectedElement && isCredentialTarget(selectedElement.role, selectedElement.name)) {
+          if (selectedElement && isCredentialTarget(selectedElement.role, [selectedElement.name, selectedElement.automationId, selectedElement.className].filter(Boolean).join(" "))) {
             throw new OpenUseError("CREDENTIAL_INTERACTION_DISABLED", "Credential and password entry is disabled in this MVP.");
           }
         }
@@ -561,7 +667,11 @@ export class ComputerUseAgent {
         await this.authorize(options, toolName, appName, focused.appIdentity, `Type ${redactText(typed.text)} into ${appName}`, risk, "OpenUse is requesting text input; the text itself is not shown in the activity log.");
         const result = await this.computer.typeText(typed, signal);
         const after = await this.inspectAfter(typed.windowId, signal);
-        return jsonOutput({ ...operationValue(result, after), textLength: typed.text.length });
+        return {
+          output: jsonOutput({ ...operationValue(result, after), textLength: typed.text.length }),
+          observation: after,
+          telemetry: operationTelemetry(result, window, typed.windowId, undefined, appName, selectedElement?.id),
+        };
       }
       case "computer_press_key": {
         const typed = input as ComputerToolInput["computer_press_key"];
@@ -569,7 +679,10 @@ export class ComputerUseAgent {
         const risk = classifyActionRisk(toolName, { key: typed.key, appName: focused.appName });
         await this.authorize(options, toolName, focused.appName, focused.appIdentity, `Press ${typed.key}`, risk, risk === "interaction" ? "OpenUse is requesting a key interaction." : "This key may submit, delete, or change data.");
         const result = await this.computer.pressKey(typed, signal);
-        return jsonOutput(operationValue(result));
+        return {
+          output: jsonOutput(operationValue(result)),
+          telemetry: operationTelemetry(result, undefined, undefined, "keyboard-input", focused.appName),
+        };
       }
       case "computer_scroll": {
         const typed = input as ComputerToolInput["computer_scroll"];
@@ -577,16 +690,19 @@ export class ComputerUseAgent {
         const risk = classifyActionRisk(toolName, { appName: focused.appName });
         await this.authorize(options, toolName, focused.appName, focused.appIdentity, "Scroll the focused application", risk, "OpenUse is requesting a bounded scroll.");
         const result = await this.computer.scroll(typed, signal);
-        return jsonOutput(operationValue(result));
+        return {
+          output: jsonOutput(operationValue(result)),
+          telemetry: operationTelemetry(result, undefined, undefined, "coordinate-input", focused.appName),
+        };
       }
       case "computer_wait": {
         const typed = input as ComputerToolInput["computer_wait"];
         const result = await this.computer.wait(typed.milliseconds, signal);
-        return jsonOutput(result);
+        return { output: jsonOutput(result) };
       }
       case "computer_finish": {
         const typed = input as ComputerToolInput["computer_finish"];
-        return jsonOutput({ ok: true, completed: true, summary: typed.summary });
+        return { output: jsonOutput({ ok: true, completed: true, summary: typed.summary }) };
       }
     }
   }
@@ -615,6 +731,65 @@ function findElement(inspection: WindowInspection, input: ElementSelector): Wind
     if (input.className && element.className.toLowerCase() !== input.className.toLowerCase()) return false;
     return true;
   });
+}
+
+type ActionTarget = Pick<ActionTelemetry, "targetApp" | "targetWindowId" | "targetWindowTitle" | "targetElementId">;
+
+function targetTelemetry(toolName: ComputerToolName, input: unknown, inspection?: WindowInspection): ActionTarget {
+  const record = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const windowId = typeof record.windowId === "string" ? record.windowId : undefined;
+  const elementId = typeof record.elementId === "string" ? record.elementId : undefined;
+  const window = windowId && inspection?.window.id === windowId ? inspection.window : undefined;
+  const target: ActionTarget = {
+    targetApp: window?.app,
+    targetWindowId: windowId,
+    targetWindowTitle: window?.title,
+    targetElementId: elementId,
+  };
+  if (toolName === "computer_click_element" || toolName === "computer_type_text") return target;
+  return windowId ? target : {};
+}
+
+function operationTelemetry(
+  operation: OperationResult,
+  window?: WindowInfo,
+  windowId?: string,
+  fallbackMethod?: InteractionMethod,
+  fallbackApp?: string,
+  fallbackElementId?: string,
+): Omit<ActionTelemetry, "retryCount"> {
+  const targetWindow = operation.window ?? window;
+  const interactionMethod = operation.interactionMethod === "coordinate-input" && fallbackMethod === "vision-coordinate"
+    ? fallbackMethod
+    : operation.interactionMethod ?? fallbackMethod;
+  return {
+    interactionMethod,
+    targetApp: targetWindow?.app ?? fallbackApp,
+    targetWindowId: targetWindow?.id ?? windowId,
+    targetWindowTitle: targetWindow?.title,
+    targetElementId: operation.targetElementId ?? fallbackElementId,
+  };
+}
+
+function screenshotDebug(screenshot: Screenshot): QualificationScreenshotSnapshot {
+  return {
+    width: screenshot.width,
+    height: screenshot.height,
+    originX: screenshot.captureBounds.x,
+    originY: screenshot.captureBounds.y,
+    captureWidth: screenshot.captureBounds.width,
+    captureHeight: screenshot.captureBounds.height,
+    dpi: screenshot.dpi,
+    coordinateSystem: screenshot.coordinateSystem,
+  };
+}
+
+function qualificationWindow(window: WindowInfo): QualificationWindowSnapshot {
+  return window;
+}
+
+function qualificationElement(element: WindowInspection["elements"][number]): QualificationElementSnapshot {
+  return element;
 }
 
 function failureSignature(input: unknown): string {
@@ -656,6 +831,10 @@ function actionSummary(toolName: ComputerToolName, input: unknown): string {
     case "computer_wait": return "Waiting for the interface";
     case "computer_finish": return "Verifying task completion";
   }
+}
+
+function isReadOnlyTool(toolName: ComputerToolName): boolean {
+  return toolName === "computer_list_apps" || toolName === "computer_list_windows" || toolName === "computer_inspect_window" || toolName === "computer_capture_screen";
 }
 
 function detailForTimeline(toolName: ComputerToolName, output: ToolOutput): string | undefined {

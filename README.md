@@ -13,13 +13,15 @@ The first vertical slice is intentionally small:
 
 ## Quick start on Windows
 
-Prerequisites: Node.js 20+, pnpm 10+, .NET 8 SDK, and a Windows desktop session.
+For a fresh Windows 10/11 x64 machine, follow [docs/WINDOWS_TESTING.md](docs/WINDOWS_TESTING.md). The short path is:
 
-```bash
-pnpm install
-pnpm native:build
+```powershell
+pnpm setup:windows
+pnpm verify:windows
 pnpm dev
 ```
+
+Use `pnpm qualify:windows` for the guided, three-run-per-scenario qualification harness. It writes redacted evidence under `.openuse/qualification/`, which is gitignored.
 
 Development automatically resolves `native/windows/publish/OpenUse.WindowsController.exe`. Set `OPENUSE_NATIVE_ENGINE_PATH` only when the sidecar lives elsewhere.
 

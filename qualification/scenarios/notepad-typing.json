@@ -1,0 +1,13 @@
+{
+  "id": "notepad-typing",
+  "title": "Notepad typing",
+  "task": "Open Notepad and type \"Hello from OpenUse\"",
+  "expectedOutcome": "A visible Notepad editor contains exactly Hello from OpenUse.",
+  "maxActions": 30,
+  "repeatCount": 3,
+  "criteria": [
+    "The task finishes through the OpenUse agent.",
+    "The text is verified from a fresh UI observation.",
+    "No manual interaction with Notepad is used except permission decisions."
+  ]
+}

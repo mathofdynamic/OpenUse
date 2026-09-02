@@ -14,9 +14,21 @@ pnpm build
 
 ## Windows sidecar
 
-Install the .NET 8 SDK on Windows, then run:
+For a fresh Windows 10/11 x64 machine, use the turnkey setup and preflight:
 
 ```powershell
+corepack enable
+corepack prepare pnpm@10.14.0 --activate
+pnpm setup:windows
+pnpm verify:windows
+```
+
+`setup:windows` checks prerequisites, installs the locked workspace dependencies, and publishes the sidecar. It does not install system software or change the machine. `verify:windows` runs all non-GUI checks and the non-invasive sidecar self-test; it reports `READY FOR GUI QUALIFICATION` only when every check passes.
+
+The individual commands remain useful when diagnosing one layer:
+
+```powershell
+pnpm install --frozen-lockfile
 pnpm native:build
 pnpm native:test
 pnpm test:windows
@@ -26,6 +38,9 @@ pnpm dev
 
 The sidecar is Windows-only and requires an interactive desktop session. It is not a service and does not open a TCP port. Task cancellation uses an internal JSON-lines `cancel` message so the sidecar can remain alive and drain the interrupted native action before the next task; application shutdown performs a final hard sidecar shutdown.
 `pnpm test:windows` is a non-destructive JSON-lines smoke test: it checks malformed input, unknown methods, invalid window IDs, `listWindows`, structured `wait`, cancellation, reuse after cancellation, and graceful shutdown. It does not manipulate the desktop.
+
+`pnpm qualify:windows` launches an explicit qualification-mode desktop, guides the three required scenarios three times each, and records operator-confirmed results in `.openuse/qualification/run-<timestamp>/`. `pnpm dev:qualify` is the lower-level development entry point when inspecting the qualification panel without the scenario runner.
+`pnpm test:qualification` validates that all three machine-readable scenario definitions retain the 30-action limit, three-run target, and goal-only criteria.
 
 ## Manual acceptance matrix
 
@@ -61,8 +76,10 @@ The process opened successfully and was stopped with Ctrl-C. Browser-preview UI 
 
 The Windows-targeted native projects were cross-built on the development host with .NET 10.0.400, but native tests and UI Automation cannot execute on macOS. Run `pnpm native:test` and `pnpm test:windows` on Windows before shipping the sidecar.
 
+The Windows-only commands intentionally refuse to run on macOS or Linux. A future Windows session must run `pnpm verify:windows` rather than treating a cross-build as native qualification.
+
 ## Current verification environment
 
 The development workspace used for this pass is macOS on an external volume. Node/pnpm, TypeScript, Vitest, Electron build, Electron boot, and a Windows-targeted native cross-build can be verified here. A Windows desktop session is unavailable here, so native test execution, UI Automation, and physical scenarios remain explicitly unverified until run on Windows.
 
-The native controller declares `PerMonitorV2` DPI awareness. UI Automation bounds, pointer coordinates, and screen captures are expressed in virtual-screen physical pixels. Captures also report their `dpi`, source (`screen` or `window`), reduced image dimensions, and original physical `captureBounds` to the agent. Mixed-DPI multi-monitor behavior still requires a Windows acceptance run.
+The native controller sets `PerMonitorV2` before initializing UI Automation or screen APIs. UI Automation bounds, pointer coordinates, and screen captures are expressed in virtual-screen physical pixels. Captures also report their `dpi`, source (`screen` or `window`), reduced image dimensions, and original physical `captureBounds` to the agent. Mixed-DPI multi-monitor behavior still requires a Windows acceptance run.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GatewayModelProvider, getModelCapabilities, getModelDefinition } from "./index";
+import { GatewayModelProvider, getModelCapabilities, getModelDefinition, testGatewayConnection } from "./index";
 
 describe("model capability registry", () => {
   it("marks the initial catalog as Computer Use compatible", () => {
@@ -39,5 +39,20 @@ describe("model capability registry", () => {
       tools: {},
       abortSignal: new AbortController().signal,
     })).rejects.toMatchObject({ code: "MODEL_UNSUPPORTED" });
+  });
+
+  it("reports missing credentials without contacting Gateway", async () => {
+    await expect(testGatewayConnection(async () => undefined, "openai/gpt-5.4")).resolves.toEqual({
+      ok: false,
+      code: "INVALID_API_KEY",
+      message: "Add an AI Gateway API key before testing the connection.",
+    });
+  });
+
+  it("checks capability metadata before attempting a connection", async () => {
+    await expect(testGatewayConnection(async () => "vca_test_key", "local/unknown")).resolves.toMatchObject({
+      ok: false,
+      code: "MODEL_UNSUPPORTED",
+    });
   });
 });

@@ -35,6 +35,17 @@ public sealed class ProtocolTests
     }
 
     [Fact]
+    public async Task MissingClickCoordinatesAreRejectedBeforeInput()
+    {
+        using var document = JsonDocument.Parse("{}");
+        var controller = new WindowsComputerController();
+
+        var exception = await Assert.ThrowsAsync<NativeControllerException>(() => controller.DispatchAsync("click", document.RootElement));
+
+        Assert.Equal("INVALID_TOOL_INPUT", exception.Code);
+    }
+
+    [Fact]
     public async Task UnknownMethodIsRejected()
     {
         using var document = JsonDocument.Parse("{}");
@@ -94,5 +105,28 @@ public sealed class ProtocolTests
         var json = JsonSerializer.Serialize(result, Protocol.JsonOptions);
         using var parsed = JsonDocument.Parse(json);
         Assert.Equal(JsonValueKind.Array, parsed.RootElement.GetProperty("windows").ValueKind);
+    }
+
+    [Fact]
+    public void SelfTestResultHasStructuredCapabilityFields()
+    {
+        var result = new SelfTestResult(
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            1,
+            [new MonitorInfo(0, new Bounds(0, 0, 1920, 1080), new Bounds(0, 0, 1920, 1040), 96, true)],
+            new ScreenshotDiagnostics(1440, 810, 96, "virtual-screen-physical-pixels", new Bounds(0, 0, 1920, 1080)));
+
+        var json = JsonSerializer.Serialize(result, Protocol.JsonOptions);
+        using var parsed = JsonDocument.Parse(json);
+        Assert.True(parsed.RootElement.GetProperty("ok").GetBoolean());
+        Assert.True(parsed.RootElement.GetProperty("dpiAvailable").GetBoolean());
+        Assert.Equal(1, parsed.RootElement.GetProperty("monitorCount").GetInt32());
+        Assert.Equal(JsonValueKind.Array, parsed.RootElement.GetProperty("monitors").ValueKind);
     }
 }

@@ -3,7 +3,7 @@ import { createInterface, type Interface } from "node:readline";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { nativeResponseSchema, type NativeMethod, type NativeMethodParams, type NativeMethodResult } from "@openuse/protocol";
-import { OpenUseError, type EngineStatus } from "@openuse/shared";
+import { OpenUseError, nowIso, type EngineStatus } from "@openuse/shared";
 import type { ComputerRpc } from "@openuse/computer";
 
 interface NativeProcessOptions {
@@ -27,6 +27,8 @@ export class NativeEngineProcess implements ComputerRpc {
   private sequence = 0;
   private hasAttemptedStart = false;
   private processState: EngineStatus["state"];
+  private lastHeartbeatAt: string | undefined;
+  private lastAction: string | undefined;
 
   constructor(private readonly options: NativeProcessOptions) {
     this.processState = options.platform === "win32" ? "offline" : "unsupported";
@@ -34,13 +36,18 @@ export class NativeEngineProcess implements ComputerRpc {
 
   get status(): EngineStatus {
     if (this.options.platform !== "win32") {
-      return { platform: this.options.platform, state: "unsupported", detail: "OpenUse controls Windows only." };
+      return { platform: this.options.platform, state: "unsupported", detail: "OpenUse controls Windows only.", canStart: false };
     }
     if (this.child && !this.child.killed) {
       return {
         platform: this.options.platform,
         state: this.processState === "starting" ? "starting" : "ready",
         detail: this.processState === "starting" ? "Starting the Windows sidecar." : "Windows sidecar connected.",
+        canStart: true,
+        pid: this.child.pid ?? undefined,
+        protocol: "json-lines/v1",
+        lastHeartbeatAt: this.lastHeartbeatAt,
+        lastAction: this.lastAction,
       };
     }
     const enginePath = this.resolveEnginePath();
@@ -60,7 +67,15 @@ export class NativeEngineProcess implements ComputerRpc {
         : available
         ? "Windows sidecar is ready to start."
         : "Publish the Windows sidecar with pnpm native:build.",
+      canStart: available && state !== "stopped",
+      protocol: "json-lines/v1",
+      lastHeartbeatAt: this.lastHeartbeatAt,
+      lastAction: this.lastAction,
     };
+  }
+
+  async selfTest(signal?: AbortSignal) {
+    return this.request("selfTest", {}, signal);
   }
 
   async request<M extends NativeMethod>(
@@ -77,6 +92,7 @@ export class NativeEngineProcess implements ComputerRpc {
     const child = this.child;
     if (!child?.stdin.writable) throw new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar is offline.");
     const id = `native-${++this.sequence}`;
+    this.lastAction = method;
     const payload = `${JSON.stringify({ id, method, params })}\n`;
     return new Promise<NativeMethodResult[M]>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -100,6 +116,10 @@ export class NativeEngineProcess implements ComputerRpc {
         reject(new OpenUseError("TASK_CANCELLED", "The task was stopped."));
       };
       signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) {
+        abort();
+        return;
+      }
       try {
         child.stdin.write(payload, "utf8", (error) => {
           if (!error) return;
@@ -217,6 +237,7 @@ export class NativeEngineProcess implements ComputerRpc {
       this.handleProtocolFailure(new OpenUseError("IPC_ERROR", "The Windows sidecar returned an invalid response."));
       return;
     }
+    this.lastHeartbeatAt = nowIso();
     const pending = this.pending.get(response.data.id);
     if (!pending) return;
     this.pending.delete(response.data.id);
