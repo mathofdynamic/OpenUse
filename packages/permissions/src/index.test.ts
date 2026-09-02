@@ -67,4 +67,55 @@ describe("application permissions", () => {
       reason: "control",
     }, new AbortController().signal)).rejects.toMatchObject({ code: "APP_NOT_ALLOWED" });
   });
+
+  it("matches persisted permissions by stable application identity", async () => {
+    const store = new InMemoryPermissionStore([
+      {
+        appName: "Calculator",
+        appIdentity: "win32:calculatorapp:applicationframewindow",
+        level: "DENY",
+        updatedAt: new Date().toISOString(),
+      },
+    ]);
+    let prompts = 0;
+    const engine = new PermissionEngine(store, {
+      request: async (request) => {
+        prompts += 1;
+        expect(request.appIdentity).toBe("win32:calculatorapp:applicationframewindow");
+        return "allow-once";
+      },
+    });
+
+    await expect(engine.authorize({
+      appName: "Calculator",
+      appIdentity: "win32:calculatorapp:applicationframewindow",
+      tool: "computer_focus_window",
+      actionSummary: "Focus Calculator",
+      risk: "interaction",
+      reason: "control",
+    }, new AbortController().signal)).rejects.toMatchObject({ code: "APP_NOT_ALLOWED" });
+
+    expect(prompts).toBe(0);
+  });
+
+  it("keeps allow-once usable across a launch name and its discovered window identity", async () => {
+    const engine = new PermissionEngine(new InMemoryPermissionStore([]), {
+      request: async () => "allow-once",
+    });
+    await engine.authorize({
+      appName: "Paint",
+      tool: "computer_launch_app",
+      actionSummary: "Open Paint",
+      risk: "interaction",
+      reason: "control",
+    }, new AbortController().signal);
+    await expect(engine.authorize({
+      appName: "Paint",
+      appIdentity: "win32:mspaint:paintwindow",
+      tool: "computer_inspect_window",
+      actionSummary: "Inspect Paint",
+      risk: "read",
+      reason: "inspect",
+    }, new AbortController().signal)).resolves.toBeUndefined();
+  });
 });

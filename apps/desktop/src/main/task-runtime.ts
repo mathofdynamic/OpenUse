@@ -46,16 +46,16 @@ class PersistentPermissionStore implements PermissionStore {
 
   constructor(
     records: PermissionRecord[],
-    private readonly persist: (appName: string, level: PermissionLevel) => Promise<void>,
+    private readonly persist: (appName: string, level: PermissionLevel, appIdentity?: string) => Promise<void>,
   ) {
     this.memory = new InMemoryPermissionStore(records);
   }
 
-  get(appName: string) { return this.memory.get(appName); }
+  get(appName: string, appIdentity?: string) { return this.memory.get(appName, appIdentity); }
   records() { return this.memory.records(); }
-  async set(appName: string, level: PermissionLevel) {
-    this.memory.set(appName, level);
-    await this.persist(appName, level);
+  async set(appName: string, level: PermissionLevel, appIdentity?: string) {
+    this.memory.set(appName, level, appIdentity);
+    await this.persist(appName, level, appIdentity);
   }
 }
 
@@ -67,7 +67,7 @@ export class TaskRuntime {
   constructor(private readonly options: TaskRuntimeOptions) {
     this.permissions = new PersistentPermissionStore(
       options.settings.persisted.permissions,
-      (appName, level) => options.settings.setPermission(appName, level),
+      (appName, level, appIdentity) => options.settings.setPermission(appName, level, appIdentity),
     );
   }
 
@@ -165,8 +165,8 @@ export class TaskRuntime {
     pending.resolve(decision);
   }
 
-  async setPermission(appName: string, level: PermissionLevel): Promise<void> {
-    await this.permissions.set(appName, level);
+  async setPermission(appName: string, level: PermissionLevel, appIdentity?: string): Promise<void> {
+    await this.permissions.set(appName, level, appIdentity);
   }
 
   settings(apiKeyConfigured: boolean): AppSettings {

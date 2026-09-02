@@ -8,8 +8,8 @@ import {
 } from "@openuse/shared";
 
 export interface PermissionStore {
-  get(appName: string): PermissionLevel | undefined;
-  set(appName: string, level: PermissionLevel): Promise<void> | void;
+  get(appName: string, appIdentity?: string): PermissionLevel | undefined;
+  set(appName: string, level: PermissionLevel, appIdentity?: string): Promise<void> | void;
   records(): PermissionRecord[];
 }
 
@@ -19,6 +19,7 @@ export interface PermissionPrompt {
 
 export interface AuthorizationInput {
   appName: string;
+  appIdentity?: string;
   tool: string;
   actionSummary: string;
   risk: ActionRisk;
@@ -46,17 +47,29 @@ export class InMemoryPermissionStore implements PermissionStore {
   private readonly values = new Map<string, PermissionRecord>();
 
   constructor(records: PermissionRecord[] = defaultPermissionRecords()) {
-    for (const record of records) this.values.set(normalizeAppName(record.appName).toLowerCase(), record);
+    for (const record of records) {
+      const appName = normalizeAppName(record.appName);
+      const appIdentity = record.appIdentity ? normalizeAppName(record.appIdentity) : undefined;
+      this.values.set(permissionKey(appIdentity ?? appName), { ...record, appName, appIdentity });
+    }
   }
 
-  get(appName: string): PermissionLevel | undefined {
-    return this.values.get(normalizeAppName(appName).toLowerCase())?.level;
+  get(appName: string, appIdentity?: string): PermissionLevel | undefined {
+    const displayKey = permissionKey(appName);
+    const identityKey = appIdentity ? permissionKey(appIdentity) : undefined;
+    return (identityKey ? this.values.get(identityKey) : undefined)?.level ?? this.values.get(displayKey)?.level;
   }
 
-  set(appName: string, level: PermissionLevel): void {
+  set(appName: string, level: PermissionLevel, appIdentity?: string): void {
     const normalized = normalizeAppName(appName);
-    this.values.set(normalized.toLowerCase(), {
+    const normalizedIdentity = appIdentity ? normalizeAppName(appIdentity) : undefined;
+    const existing = normalizedIdentity
+      ? undefined
+      : [...this.values.values()].find((record) => record.appName.toLowerCase() === normalized.toLowerCase());
+    const effectiveIdentity = normalizedIdentity ?? existing?.appIdentity;
+    this.values.set(permissionKey(effectiveIdentity ?? normalized), {
       appName: normalized,
+      appIdentity: effectiveIdentity,
       level,
       updatedAt: new Date().toISOString(),
     });
@@ -107,8 +120,10 @@ export class PermissionEngine {
   async authorize(input: AuthorizationInput, signal: AbortSignal): Promise<void> {
     if (signal.aborted) throw new OpenUseError("TASK_CANCELLED", "The task was stopped.");
     const appName = normalizeAppName(input.appName || "Unknown application");
-    const key = appName.toLowerCase();
-    const existing = this.store.get(appName);
+    const appIdentity = normalizeAppName(input.appIdentity || appName);
+    const key = permissionKey(appIdentity);
+    const displayKey = permissionKey(appName);
+    const existing = this.store.get(appName, appIdentity);
     const mustAskForRisk = input.risk === "sensitive" || input.risk === "destructive";
 
     if (CREDENTIAL_APP_WORDS.test(appName)) {
@@ -118,7 +133,7 @@ export class PermissionEngine {
     if (!mustAskForRisk && existing === "DENY") {
       throw new OpenUseError("APP_NOT_ALLOWED", `${appName} is not allowed to be controlled.`);
     }
-    if (!mustAskForRisk && (existing === "ALLOW" || this.sessionAllowed.has(key))) return;
+    if (!mustAskForRisk && (existing === "ALLOW" || this.sessionAllowed.has(key) || this.sessionAllowed.has(displayKey))) return;
     if (existing === "DENY") {
       throw new OpenUseError("APP_NOT_ALLOWED", `${appName} is denied by OpenUse permissions.`);
     }
@@ -126,6 +141,7 @@ export class PermissionEngine {
     const request: PermissionRequest = {
       id: crypto.randomUUID(),
       appName,
+      appIdentity,
       tool: input.tool,
       actionSummary: input.actionSummary,
       risk: input.risk,
@@ -136,15 +152,23 @@ export class PermissionEngine {
       throw new OpenUseError("USER_DENIED", `You denied control of ${appName}.`);
     }
     if (decision === "allow-once") {
-      if (!mustAskForRisk) this.sessionAllowed.add(key);
+      if (!mustAskForRisk) {
+        this.sessionAllowed.add(key);
+        this.sessionAllowed.add(displayKey);
+      }
       return;
     }
     if (decision === "always-allow") {
       if (mustAskForRisk) return;
-      await this.store.set(appName, "ALLOW");
+      await this.store.set(appName, "ALLOW", appIdentity);
       this.sessionAllowed.add(key);
+      this.sessionAllowed.add(displayKey);
     }
   }
+}
+
+function permissionKey(value: string): string {
+  return normalizeAppName(value).toLowerCase();
 }
 
 export function isCredentialTarget(role?: string, name?: string): boolean {

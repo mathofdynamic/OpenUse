@@ -1,0 +1,101 @@
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { NativeEngineProcess } from "./native-process";
+
+const temporaryDirectories: string[] = [];
+const engines: NativeEngineProcess[] = [];
+const originalEnginePath = process.env.OPENUSE_NATIVE_ENGINE_PATH;
+
+afterEach(async () => {
+  for (const engine of engines.splice(0)) await engine.shutdown();
+  if (originalEnginePath === undefined) delete process.env.OPENUSE_NATIVE_ENGINE_PATH;
+  else process.env.OPENUSE_NATIVE_ENGINE_PATH = originalEnginePath;
+  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+});
+
+async function fakeSidecar(body: string): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), "openuse-native-process-"));
+  temporaryDirectories.push(directory);
+  const path = join(directory, "sidecar.sh");
+  await writeFile(path, `#!/bin/sh\n${body}\n`, "utf8");
+  await chmod(path, 0o700);
+  process.env.OPENUSE_NATIVE_ENGINE_PATH = path;
+  return path;
+}
+
+function createEngine(): NativeEngineProcess {
+  const engine = new NativeEngineProcess({
+    platform: "win32",
+    isPackaged: false,
+    appPath: "/tmp/openuse-test-app",
+    resourcesPath: "/tmp/openuse-test-resources",
+  });
+  engines.push(engine);
+  return engine;
+}
+
+describe("native sidecar process boundary", () => {
+  it("reports an unavailable executable without waiting on a request timeout", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "openuse-native-process-"));
+    temporaryDirectories.push(directory);
+    process.env.OPENUSE_NATIVE_ENGINE_PATH = join(directory, "missing-sidecar");
+    const engine = createEngine();
+
+    await expect(engine.request("listWindows", {})).rejects.toMatchObject({ code: "NATIVE_ENGINE_OFFLINE" });
+  });
+
+  it("turns malformed stdout into IPC_ERROR and marks the sidecar offline", async () => {
+    await fakeSidecar("IFS= read -r request\nprintf 'not-json\\n'");
+    const engine = createEngine();
+
+    await expect(engine.request("listWindows", {})).rejects.toMatchObject({ code: "IPC_ERROR" });
+    expect(engine.status.state).toBe("offline");
+  });
+
+  it("turns an unexpected child exit into NATIVE_ENGINE_OFFLINE", async () => {
+    await fakeSidecar("exit 9");
+    const engine = createEngine();
+
+    await expect(engine.request("listWindows", {})).rejects.toMatchObject({ code: "NATIVE_ENGINE_OFFLINE" });
+    expect(engine.status.state).toBe("offline");
+  });
+
+  it("cancels an in-flight request without waiting for the native timeout", async () => {
+    await fakeSidecar("IFS= read -r request\nsleep 0.2");
+    const engine = createEngine();
+    const abort = new AbortController();
+    const request = engine.request("listWindows", {}, abort.signal);
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    abort.abort();
+
+    await expect(request).rejects.toMatchObject({ code: "TASK_CANCELLED" });
+    await engine.stop();
+    expect(engine.status.state).toBe("ready");
+  });
+
+  it("keeps a healthy sidecar reusable after cancelling a request", async () => {
+    await fakeSidecar(`
+first=1
+while IFS= read -r request; do
+  case "$request" in
+    *'"method":"cancel"'*) printf '%s\\n' '{"id":"native-cancel-2","ok":true,"result":{"ok":true,"cancelled":true}}' ;;
+    *'"method":"listWindows"'*)
+      if [ "$first" = 1 ]; then first=0; else printf '%s\\n' '{"id":"native-3","ok":true,"result":{"windows":[]}}' ; fi
+      ;;
+  esac
+done`);
+    const engine = createEngine();
+    const abort = new AbortController();
+    const request = engine.request("listWindows", {}, abort.signal);
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    abort.abort();
+    await expect(request).rejects.toMatchObject({ code: "TASK_CANCELLED" });
+
+    await expect(engine.request("listWindows", {})).resolves.toEqual({ windows: [] });
+    expect(engine.status.state).toBe("ready");
+  });
+});

@@ -9,7 +9,7 @@ declare global {
       startTask(command: string): Promise<void>;
       stopTask(): Promise<void>;
       decidePermission(id: string, decision: PermissionDecision): Promise<void>;
-      setAppPermission(appName: string, level: PermissionLevel): Promise<void>;
+      setAppPermission(appName: string, level: PermissionLevel, appIdentity?: string): Promise<void>;
       onEvent(listener: (event: RuntimeEvent) => void): () => void;
     };
   }

@@ -23,6 +23,7 @@ export type PermissionDecision = "allow-once" | "always-allow" | "deny";
 
 export interface PermissionRecord {
   appName: string;
+  appIdentity?: string;
   level: PermissionLevel;
   updatedAt: string;
 }
@@ -30,6 +31,7 @@ export interface PermissionRecord {
 export interface PermissionRequest {
   id: string;
   appName: string;
+  appIdentity: string;
   tool: string;
   actionSummary: string;
   risk: ActionRisk;

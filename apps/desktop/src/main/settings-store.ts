@@ -50,10 +50,19 @@ export class SettingsStore {
     await this.persist();
   }
 
-  async setPermission(appName: string, level: PermissionLevel): Promise<void> {
+  async setPermission(appName: string, level: PermissionLevel, appIdentity?: string): Promise<void> {
     const normalized = normalizeAppName(appName);
-    const existing = this.value.permissions.find((record) => record.appName.toLowerCase() === normalized.toLowerCase());
-    const record = { appName: normalized, level, updatedAt: new Date().toISOString() };
+    const normalizedIdentity = appIdentity ? normalizeAppName(appIdentity) : undefined;
+    const existing = this.value.permissions.find((record) => {
+      if (normalizedIdentity && record.appIdentity) return record.appIdentity.toLowerCase() === normalizedIdentity.toLowerCase();
+      return record.appName.toLowerCase() === normalized.toLowerCase();
+    });
+    const record = {
+      appName: normalized,
+      appIdentity: normalizedIdentity ?? existing?.appIdentity,
+      level,
+      updatedAt: new Date().toISOString(),
+    };
     if (existing) Object.assign(existing, record);
     else this.value.permissions.push(record);
     await this.persist();
@@ -79,9 +88,12 @@ export class SettingsStore {
 function sanitizePermissions(records: PermissionRecord[]): PermissionRecord[] {
   const valid = records.filter(
     (record): record is PermissionRecord =>
-      Boolean(record) && typeof record.appName === "string" && ["ALLOW", "ASK", "DENY"].includes(record.level),
+      Boolean(record) && typeof record.appName === "string" && normalizeAppName(record.appName).length > 0 && ["ALLOW", "ASK", "DENY"].includes(record.level),
   ).map((record) => ({
     appName: normalizeAppName(record.appName),
+    appIdentity: typeof record.appIdentity === "string" && normalizeAppName(record.appIdentity).length > 0
+      ? normalizeAppName(record.appIdentity)
+      : undefined,
     level: record.level,
     updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString(),
   }));

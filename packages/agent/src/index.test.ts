@@ -105,4 +105,26 @@ describe("ComputerUseAgent", () => {
     })).rejects.toMatchObject({ code: "TASK_CANCELLED" });
     expect(provider.calls).toHaveLength(0);
   });
+
+  it("requests a fresh observation after a stale window target instead of replaying blindly", async () => {
+    const provider = new ScriptedProvider([
+      assistantTool("computer_click_element", "stale-1", { windowId: "gone-window", role: "Button", name: "Save" }),
+      assistantTool("computer_finish", "stale-2", { summary: "Stopped after refreshing the UI state." }),
+    ]);
+    const computer = new MockComputerController();
+    const permissions = new PermissionEngine(new InMemoryPermissionStore(), { request: async () => "deny" });
+    const agent = new ComputerUseAgent(provider, computer, permissions);
+
+    const result = await agent.run({
+      taskId: "stale-task",
+      command: "Click Save",
+      modelId: "openai/gpt-5.4",
+      abortSignal: new AbortController().signal,
+      onEvent: () => undefined,
+    });
+
+    expect(result).toMatchObject({ status: "completed", actionCount: 2 });
+    expect(provider.calls[1]?.messages.some((message) => message.role === "user" && typeof message.content === "string" && message.content.includes("computer_inspect_window"))).toBe(true);
+    expect(computer.state.actions.map((action) => action.method)).toEqual(["listWindows"]);
+  });
 });

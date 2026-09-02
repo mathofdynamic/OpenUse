@@ -21,7 +21,7 @@ flowchart TD
 
 ## Process ownership
 
-Electron main starts the sidecar only when a task needs it. The sidecar is a child process with private stdin/stdout, no listening socket, and no general shell interface. Each request has an ID and receives exactly one structured response. If the task is stopped, the main process aborts the model request, rejects pending protocol requests, and terminates the sidecar so no queued native action can continue.
+Electron main starts the sidecar only when a task needs it. The sidecar is a child process with private stdin/stdout, no listening socket, and no general shell interface. Each request has an ID and receives exactly one structured response. If the task is stopped, the main process aborts the model request, rejects pending protocol requests, and sends an internal cancellation message; the sidecar drains the cancelled action on its STA worker and stays reusable. Hard termination is reserved for sidecar failure, startup cancellation, or application shutdown.
 
 ## Package boundaries
 

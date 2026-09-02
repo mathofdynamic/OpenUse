@@ -19,7 +19,7 @@ OpenUse is local-first, but Computer Use is inherently powerful. The MVP uses ex
 - Sensitive and destructive approvals are one-action approvals; they are never persisted as `Always allow`.
 - Credential/password entry is disabled in this MVP.
 - The agent refreshes the target UI state before semantic interaction, and the native controller checks the focused UI Automation control again before text input.
-- A stopped task aborts the model request, cancels queued work, rejects pending native calls, and terminates the sidecar.
+- A stopped task aborts the model request, cancels queued work, rejects pending native calls, and sends an internal cancellation message to the sidecar. The sidecar remains reusable after its bounded STA action drains; it is terminated only for failure, startup cancellation, or application shutdown.
 
 ## Data leaving the machine
 

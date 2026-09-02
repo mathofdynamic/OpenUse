@@ -15,6 +15,7 @@ let settings: SettingsStore;
 let secrets: GatewaySecretStore;
 let engine: NativeEngineProcess;
 let runtime: TaskRuntime;
+let isQuitting = false;
 
 const modelSchema = z.object({ modelId: z.string().min(1).max(160) });
 const keySchema = z.object({ apiKey: z.string().trim().min(1).max(500) });
@@ -25,6 +26,7 @@ const permissionDecisionSchema = z.object({
 });
 const appPermissionSchema = z.object({
   appName: z.string().trim().min(1).max(160),
+  appIdentity: z.string().trim().min(1).max(240).optional(),
   level: z.enum(["ALLOW", "ASK", "DENY"]),
 });
 
@@ -71,8 +73,8 @@ function installIpc(): void {
   });
   ipcMain.handle("openuse:set-app-permission", async (event, raw: unknown) => {
     assertSender(event);
-    const { appName, level } = appPermissionSchema.parse(raw) as { appName: string; level: PermissionLevel };
-    await runtime.setPermission(appName, level);
+    const { appName, appIdentity, level } = appPermissionSchema.parse(raw) as { appName: string; appIdentity?: string; level: PermissionLevel };
+    await runtime.setPermission(appName, level, appIdentity);
   });
 }
 
@@ -129,6 +131,13 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
-  void runtime?.stop();
+app.on("before-quit", (event) => {
+  if (isQuitting) return;
+  event.preventDefault();
+  isQuitting = true;
+  void (async () => {
+    await runtime?.stop();
+    await engine?.shutdown();
+    app.quit();
+  })();
 });

@@ -140,8 +140,8 @@ export function App() {
     }
   }
 
-  async function updatePermission(appName: string, level: PermissionLevel) {
-    await runtimeApi.setAppPermission(appName, level);
+  async function updatePermission(appName: string, level: PermissionLevel, appIdentity?: string) {
+    await runtimeApi.setAppPermission(appName, level, appIdentity);
     const snapshot = await runtimeApi.getSnapshot();
     setSettings(snapshot.settings);
   }
@@ -435,7 +435,7 @@ function SettingsDialog({
   onApiKeyChange(value: string): void;
   onClose(): void;
   onSave(modelId: string): void;
-  onPermissionChange(appName: string, level: PermissionLevel): void;
+  onPermissionChange(appName: string, level: PermissionLevel, appIdentity?: string): void;
 }) {
   const [modelId, setModelId] = useState(settings.modelId);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -454,7 +454,7 @@ function SettingsDialog({
       <div className="settings-field"><label htmlFor="gateway-key">API key</label><input id="gateway-key" type="password" autoComplete="off" value={apiKeyDraft} onChange={(event) => onApiKeyChange(event.target.value)} placeholder={settings.apiKeyConfigured ? "Key saved — enter a new key to replace it" : "Paste your AI_GATEWAY_API_KEY"} /><div className="field-note"><Glyph name="lock" /> Stored locally with OS-backed encryption. Never returned to the renderer.</div></div>
       <div className="settings-divider" />
       <div className="permissions-heading"><div><div className="dialog-eyebrow">Application permissions</div><h3>Who can OpenUse control?</h3></div><span className="permissions-count">{settings.permissions.length} rules</span></div>
-      <div className="permission-list">{settings.permissions.map((record) => <div className="permission-row" key={record.appName}><div><div className="permission-app">{record.appName}</div><div className="permission-updated">{record.level === "ALLOW" ? "Control allowed" : record.level === "DENY" ? "Control blocked" : "Ask each time"}</div></div><div className="select-wrap permission-select"><select aria-label={`${record.appName} permission`} value={record.level} onChange={(event) => onPermissionChange(record.appName, event.target.value as PermissionLevel)}><option>ALLOW</option><option>ASK</option><option>DENY</option></select><Glyph name="chevron" /></div></div>)}</div>
+      <div className="permission-list">{settings.permissions.map((record) => <div className="permission-row" key={record.appIdentity ?? record.appName}><div><div className="permission-app">{record.appName}</div><div className="permission-updated">{record.level === "ALLOW" ? "Control allowed" : record.level === "DENY" ? "Control blocked" : "Ask each time"}</div></div><div className="select-wrap permission-select"><select aria-label={`${record.appName} permission`} value={record.level} onChange={(event) => onPermissionChange(record.appName, event.target.value as PermissionLevel, record.appIdentity)}><option>ALLOW</option><option>ASK</option><option>DENY</option></select><Glyph name="chevron" /></div></div>)}</div>
       <div className="dialog-footer"><span className="settings-status">{settings.apiKeyConfigured ? <><span className="status-dot status-ready" />Gateway key configured</> : <><span className="status-dot status-offline" />Gateway key needed</>}</span><button className="primary-action" type="button" onClick={() => onSave(modelId)}>Save settings</button></div>
     </div>
   </div>;

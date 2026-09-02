@@ -25,6 +25,7 @@ export class NativeEngineProcess implements ComputerRpc {
   private lines: Interface | undefined;
   private readonly pending = new Map<string, PendingRequest>();
   private sequence = 0;
+  private hasAttemptedStart = false;
   private processState: EngineStatus["state"];
 
   constructor(private readonly options: NativeProcessOptions) {
@@ -44,10 +45,19 @@ export class NativeEngineProcess implements ComputerRpc {
     }
     const enginePath = this.resolveEnginePath();
     const available = Boolean(enginePath && existsSync(enginePath));
+    const state = this.processState === "stopped"
+      ? "stopped"
+      : this.hasAttemptedStart && this.processState === "offline"
+        ? "offline"
+        : available
+          ? "ready"
+          : "offline";
     return {
       platform: this.options.platform,
-      state: available ? "ready" : this.processState === "stopped" ? "stopped" : "offline",
-      detail: available
+      state,
+      detail: state === "offline" && this.hasAttemptedStart
+        ? "The Windows sidecar is offline; it will be restarted on the next action."
+        : available
         ? "Windows sidecar is ready to start."
         : "Publish the Windows sidecar with pnpm native:build.",
     };
@@ -62,7 +72,8 @@ export class NativeEngineProcess implements ComputerRpc {
       throw new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows computer engine is unavailable on this host.");
     }
     if (signal?.aborted) throw new OpenUseError("TASK_CANCELLED", "The task was stopped.");
-    await this.ensureStarted();
+    await this.ensureStarted(signal);
+    if (signal?.aborted) throw new OpenUseError("TASK_CANCELLED", "The task was stopped.");
     const child = this.child;
     if (!child?.stdin.writable) throw new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar is offline.");
     const id = `native-${++this.sequence}`;
@@ -84,6 +95,7 @@ export class NativeEngineProcess implements ComputerRpc {
       abort = () => {
         if (!this.pending.delete(id)) return;
         clearTimeout(timer);
+        this.sendCancel(child, id);
         pending.cleanup();
         reject(new OpenUseError("TASK_CANCELLED", "The task was stopped."));
       };
@@ -104,26 +116,49 @@ export class NativeEngineProcess implements ComputerRpc {
   }
 
   async stop(): Promise<void> {
+    const child = this.child;
+    if (child && !child.killed && this.processState === "starting") {
+      this.lines?.close();
+      this.lines = undefined;
+      this.child = undefined;
+      this.processState = "offline";
+      child.kill();
+      return;
+    }
     for (const [id, request] of this.pending) {
       clearTimeout(request.timer);
       request.cleanup();
+      this.sendCancel(child, id);
       request.reject(new OpenUseError("TASK_CANCELLED", "The task was stopped."));
       this.pending.delete(id);
     }
+    if (child && !child.killed) {
+      // The sidecar has its own cancellation queue. Keep the process and its
+      // STA worker alive so a new task can start without a process restart.
+      this.processState = "ready";
+    } else {
+      this.processState = "offline";
+    }
+  }
+
+  async shutdown(): Promise<void> {
+    await this.stop();
     this.lines?.close();
     this.lines = undefined;
     const child = this.child;
     this.child = undefined;
-    this.processState = "offline";
+    this.processState = "stopped";
     if (child && !child.killed) child.kill();
   }
 
-  private async ensureStarted(): Promise<void> {
+  private async ensureStarted(signal?: AbortSignal): Promise<void> {
     if (this.child && !this.child.killed) return;
+    if (signal?.aborted) throw new OpenUseError("TASK_CANCELLED", "The task was stopped.");
     const enginePath = this.resolveEnginePath();
     if (!enginePath || !existsSync(enginePath)) {
       throw new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar executable is not available.");
     }
+    this.hasAttemptedStart = true;
     this.processState = "starting";
     const child = spawn(enginePath, [], {
       stdio: ["pipe", "pipe", "pipe"],
@@ -133,10 +168,39 @@ export class NativeEngineProcess implements ComputerRpc {
     this.lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
     this.lines.on("line", (line) => this.handleLine(line));
     child.stderr.on("data", () => undefined);
-    child.once("error", (error) => this.handleProcessExit(error));
-    child.once("exit", () => this.handleProcessExit());
-    await new Promise<void>((resolve) => setTimeout(resolve, 25));
-    if (!this.child) throw new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar stopped while starting.");
+    let started = false;
+    const startup = new Promise<void>((resolve, reject) => {
+      child.once("spawn", () => {
+        started = true;
+        resolve();
+      });
+      child.on("error", (error) => {
+        if (!started) reject(new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar could not start.", error));
+        this.handleProcessExit(child, error);
+      });
+      child.once("exit", (code) => {
+        if (!started) reject(new OpenUseError("NATIVE_ENGINE_OFFLINE", `The Windows sidecar exited during startup (${code ?? "unknown"}).`));
+        this.handleProcessExit(child);
+      });
+    });
+    let removeAbortListener: () => void = () => undefined;
+    const cancelled = signal
+      ? new Promise<never>((_, reject) => {
+          const abort = () => reject(new OpenUseError("TASK_CANCELLED", "The task was stopped."));
+          if (signal.aborted) {
+            abort();
+            return;
+          }
+          signal.addEventListener("abort", abort, { once: true });
+          removeAbortListener = () => signal.removeEventListener("abort", abort);
+        })
+      : undefined;
+    try {
+      await (cancelled ? Promise.race([startup, cancelled]) : startup);
+    } finally {
+      removeAbortListener();
+    }
+    if (this.child !== child) throw new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar stopped while starting.");
     this.processState = "ready";
   }
 
@@ -145,10 +209,14 @@ export class NativeEngineProcess implements ComputerRpc {
     try {
       parsed = JSON.parse(line);
     } catch {
+      this.handleProtocolFailure(new OpenUseError("IPC_ERROR", "The Windows sidecar returned malformed JSON."));
       return;
     }
     const response = nativeResponseSchema.safeParse(parsed);
-    if (!response.success) return;
+    if (!response.success) {
+      this.handleProtocolFailure(new OpenUseError("IPC_ERROR", "The Windows sidecar returned an invalid response."));
+      return;
+    }
     const pending = this.pending.get(response.data.id);
     if (!pending) return;
     this.pending.delete(response.data.id);
@@ -162,19 +230,49 @@ export class NativeEngineProcess implements ComputerRpc {
     pending.resolve(response.data.result);
   }
 
-  private handleProcessExit(cause?: unknown): void {
+  private failPending(error: OpenUseError): void {
+    for (const [id, request] of this.pending) {
+      clearTimeout(request.timer);
+      request.cleanup();
+      request.reject(error);
+      this.pending.delete(id);
+    }
+  }
+
+  private handleProtocolFailure(error: OpenUseError): void {
+    this.failPending(error);
     const child = this.child;
     if (!child) return;
     this.child = undefined;
     this.lines?.close();
     this.lines = undefined;
-    for (const [id, request] of this.pending) {
-      clearTimeout(request.timer);
-      request.cleanup();
-      request.reject(new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar stopped unexpectedly.", cause));
-      this.pending.delete(id);
-    }
     this.processState = "offline";
+    if (!child.killed) child.kill();
+  }
+
+  private handleProcessExit(exitedChild: ChildProcessWithoutNullStreams, cause?: unknown): void {
+    if (this.child !== exitedChild) return;
+    const child = this.child;
+    if (!child) return;
+    this.child = undefined;
+    this.lines?.close();
+    this.lines = undefined;
+    this.failPending(new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar stopped unexpectedly.", cause));
+    this.processState = "offline";
+  }
+
+  private sendCancel(child: ChildProcessWithoutNullStreams | undefined, requestId: string): void {
+    if (!child || child.killed || !child.stdin.writable) return;
+    const id = `native-cancel-${++this.sequence}`;
+    const payload = `${JSON.stringify({ id, method: "cancel", params: { requestId } })}\n`;
+    try {
+      child.stdin.write(payload, "utf8", (error) => {
+        if (!error || this.child !== child) return;
+        this.handleProtocolFailure(new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar could not receive cancellation."));
+      });
+    } catch {
+      if (this.child === child) this.handleProtocolFailure(new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar could not receive cancellation."));
+    }
   }
 
   private resolveEnginePath(): string | undefined {

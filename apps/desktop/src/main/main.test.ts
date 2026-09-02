@@ -47,11 +47,12 @@ describe("desktop local stores", () => {
       defaultPermissionRecords().map(({ appName, level }) => ({ appName, level })),
     );
     await store.setModel("google/gemini-3-flash");
-    await store.setPermission("Paint", "ASK");
+    await store.setPermission("Paint", "ASK", "win32:mspaint:paintwindow");
 
     const persisted = new SettingsStore(join(directory, "settings.json"));
     await persisted.initialize();
     expect(persisted.persisted.modelId).toBe("google/gemini-3-flash");
     expect(persisted.persisted.permissions.find((record) => record.appName === "Paint")?.level).toBe("ASK");
+    expect(persisted.persisted.permissions.find((record) => record.appName === "Paint")?.appIdentity).toBe("win32:mspaint:paintwindow");
   });
 });
