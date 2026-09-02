@@ -1,4 +1,4 @@
-import { chmod, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join, resolve, basename } from "node:path";
 import { tmpdir } from "node:os";
@@ -39,7 +39,7 @@ try {
   removeAppleDouble(join(desktopDirectory, "dist"));
   run("pnpm", ["native:build:macos"], repositoryRoot, packagingEnv);
   if (!existsSync(nativeController)) throw new Error(`The Swift controller was not built: ${nativeController}`);
-  await chmod(nativeController, 0o755);
+  chmodSync(nativeController, 0o755);
   run(process.execPath, [join(repositoryRoot, "scripts", "generate-macos-icon.mjs")], repositoryRoot, packagingEnv);
   if (!existsSync(iconPath)) throw new Error(`The macOS icon was not generated: ${iconPath}`);
 

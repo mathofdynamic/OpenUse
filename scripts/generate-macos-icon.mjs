@@ -34,6 +34,6 @@ function renderIcon(size, output) {
   execFileSync("sips", ["--resampleHeightWidthMax", String(size), source, "--out", resized], { stdio: "ignore" });
   // Pad non-square artwork with transparent pixels. The source artwork is not
   // cropped, stretched, recolored, or given a generated background.
-  execFileSync("sips", ["--padToHeightWidth", String(size), String(size), "--padColor", "00000000", resized, "--out", output], { stdio: "ignore" });
+  execFileSync("sips", ["--padToHeightWidth", String(size), String(size), resized, "--out", output], { stdio: "ignore" });
   rmSync(resized, { force: true });
 }
