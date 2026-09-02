@@ -1,0 +1,14 @@
+{
+  "platform": "darwin",
+  "id": "macos-textedit-save-as",
+  "title": "macOS TextEdit Save As",
+  "task": "Open TextEdit, type \"OpenUse test file\", and save it as openuse-test.txt on my Desktop.",
+  "expectedOutcome": "TextEdit saves the requested text as openuse-test.txt on the user's Desktop and the saved state is verified through UI state.",
+  "maxActions": 30,
+  "repeatCount": 3,
+  "criteria": [
+    "The native Save dialog is inspected after it appears.",
+    "The filename and Desktop location are selected through OpenUse tools.",
+    "The saved state is verified through UI state; no arbitrary filesystem tool is introduced."
+  ]
+}

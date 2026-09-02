@@ -52,12 +52,12 @@ describe("qualification recorder", () => {
       taskId: "task-1",
       actionId: "action-1",
       durationMs: 12,
-      telemetry: { interactionMethod: "uia-native", retryCount: 0 },
+      telemetry: { interactionMethod: "accessibility-native", retryCount: 0 },
       at: "2026-09-02T00:00:01.000Z",
     });
 
     const events = await readFile(join(directory, "events.jsonl"), "utf8");
-    expect(events).toContain("uia-native");
+    expect(events).toContain("accessibility-native");
     expect(events).toContain("commandLength");
     expect(events).not.toContain("type a private value");
     expect(events).not.toContain("private value");

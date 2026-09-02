@@ -11,6 +11,7 @@
     "build": "node scripts/build.mjs",
     "build:main": "node scripts/build-main.mjs",
     "test:windows": "node scripts/test-windows.mjs",
+    "test:macos": "node scripts/test-macos.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts"
   },

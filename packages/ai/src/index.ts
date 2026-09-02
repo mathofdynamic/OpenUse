@@ -2,7 +2,16 @@ import { createGateway, generateText, isStepCount } from "ai";
 import type { ModelMessage, ToolSet } from "ai";
 import { OpenUseError, type ModelCapabilities, type ModelDefinition } from "@openuse/shared";
 
+export const DEFAULT_MODEL_ID = "openai/gpt-5.6-luna";
+export const DEFAULT_REASONING_EFFORT = "high" as const;
+
 export const MODEL_CATALOG: ModelDefinition[] = [
+  {
+    id: DEFAULT_MODEL_ID,
+    label: "GPT-5.6 Luna · high reasoning",
+    provider: "vercel-gateway",
+    capabilities: { toolCalling: true, vision: true, reasoning: true },
+  },
   {
     id: "openai/gpt-5.4",
     label: "GPT-5.4",
@@ -77,7 +86,11 @@ export async function testGatewayConnection(
     await generateText({
       model: gateway(modelId),
       prompt: "Reply with the single word OK.",
-      maxOutputTokens: 4,
+      // Some Gateway-routed reasoning models reject very small output budgets
+      // before generation begins. Keep this probe small, but above the
+      // provider minimum so a valid key is not misreported as a connection
+      // failure.
+      maxOutputTokens: 32,
       maxRetries: 0,
       abortSignal,
     });
@@ -87,19 +100,28 @@ export async function testGatewayConnection(
   }
 }
 
-function classifyGatewayConnectionError(error: unknown): GatewayConnectionResult {
+export function classifyGatewayConnectionError(error: unknown): GatewayConnectionResult {
   const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
   const status = typeof record.statusCode === "number"
     ? record.statusCode
     : typeof record.status === "number"
       ? record.status
       : undefined;
+  const gatewayType = typeof record.type === "string" ? record.type : undefined;
+  const gatewayName = typeof record.name === "string" ? record.name : undefined;
   const message = error instanceof Error ? error.message.toLowerCase() : "";
-  if (status === 404 || /model.+(not found|unsupported|does not exist)|unknown model/.test(message)) {
-    return { ok: false, code: "MODEL_UNSUPPORTED", message: "The selected model is not available through the AI Gateway." };
+  const statusDetail = status ? ` (HTTP ${status})` : "";
+  if (gatewayType === "model_not_found" || gatewayName === "GatewayModelNotFoundError" || status === 404 || /model.+(not found|unsupported|does not exist)|unknown model/.test(message)) {
+    return { ok: false, code: "MODEL_UNSUPPORTED", message: `The selected model is not available through the AI Gateway${statusDetail}.` };
   }
-  if (status === 401 || status === 403 || /unauthorized|forbidden|invalid.+(key|token)|api key/.test(message)) {
-    return { ok: false, code: "INVALID_API_KEY", message: "The AI Gateway rejected the API key." };
+  if (gatewayType === "authentication_error" || gatewayName === "GatewayAuthenticationError" || status === 401) {
+    return { ok: false, code: "INVALID_API_KEY", message: `AI Gateway authentication failed${statusDetail}. Use a Vercel AI Gateway key from the AI Gateway API Keys page; OpenAI or Anthropic provider keys are not interchangeable.` };
+  }
+  if (gatewayType === "forbidden" || gatewayType === "access_denied" || gatewayName === "GatewayForbiddenError" || status === 403 || /forbidden|routing rule|policy|access denied/.test(message)) {
+    return { ok: false, code: "GATEWAY_ERROR", message: `The AI Gateway denied this request${statusDetail} by policy or model access. The API key may still be valid.` };
+  }
+  if (/unauthorized|invalid.+(key|token)|api key/.test(message)) {
+    return { ok: false, code: "INVALID_API_KEY", message: `AI Gateway authentication failed${statusDetail}. Use a Vercel AI Gateway key from the AI Gateway API Keys page; OpenAI or Anthropic provider keys are not interchangeable.` };
   }
   if (/enotfound|econnrefused|etimedout|econnreset|enetunreach|network|fetch failed|offline/.test(message)) {
     return { ok: false, code: "NETWORK_ERROR", message: "OpenUse could not reach the AI Gateway. Check the network connection." };
@@ -137,6 +159,7 @@ export class GatewayModelProvider implements ModelProvider {
         instructions: options.instructions,
         messages: options.messages,
         tools: options.tools,
+        reasoning: options.modelId === DEFAULT_MODEL_ID ? DEFAULT_REASONING_EFFORT : undefined,
         stopWhen: isStepCount(1),
         maxRetries: 1,
         abortSignal: options.abortSignal,

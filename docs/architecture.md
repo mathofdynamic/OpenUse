@@ -12,9 +12,9 @@ flowchart TD
     Agent --> Tools[Typed OpenUse tools]
     Tools --> Policy[Permission and risk layer]
     Policy --> Controller[ComputerController]
-    Controller -->|JSON-lines over stdin/stdout| Sidecar[Windows .NET 8 sidecar]
-    Sidecar --> UIA[Windows UI Automation]
-    Sidecar --> Input[Windows input and capture APIs]
+    Controller -->|JSON-lines over stdin/stdout| Sidecar[Native platform sidecar]
+    Sidecar --> Win[Windows .NET 8 UI Automation / Win32]
+    Sidecar --> Mac[macOS Swift AXUIElement / CoreGraphics]
     UI -. status/events .-> Main
     Main -->|redacted timeline events| UI
 ```
@@ -32,8 +32,9 @@ Electron main starts the sidecar only when a task needs it. The sidecar is a chi
 - `packages/ai` owns `ModelProvider` and the Gateway implementation. It knows nothing about Windows or the UI.
 - `packages/agent` owns tool schemas, observation/action ordering, step limits, cancellation, and concise event summaries.
 - `apps/desktop` composes all services, owns Electron lifecycle and secrets, and exposes a narrow renderer API.
-- `native/windows` implements only Windows observation, UI Automation interaction, keyboard/mouse fallback, and screen capture.
+- `native/windows` implements Windows observation, UI Automation interaction, keyboard/mouse fallback, and screen capture.
+- `native/macos` implements macOS AX observation/actions, AppKit application/window management, CoreGraphics capture, and CGEvent keyboard/mouse fallback.
 
 ## Why the native controller is isolated
 
-Windows UI Automation is a native, stateful API with COM/UI-thread and desktop-session concerns. Keeping it in a sidecar avoids putting OS-specific bindings and failure modes into the renderer, lets the TypeScript agent use a stable contract, and leaves room for `MacComputerController` and `LinuxComputerController` later without changing the agent.
+Windows UI Automation and macOS Accessibility are native, stateful APIs with desktop-session, privacy, and coordinate-system concerns. Keeping each in a sidecar avoids putting OS-specific bindings and failure modes into the renderer, lets the TypeScript agent use one stable contract, and lets a future Linux controller be added without changing the agent.

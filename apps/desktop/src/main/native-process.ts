@@ -31,18 +31,19 @@ export class NativeEngineProcess implements ComputerRpc {
   private lastAction: string | undefined;
 
   constructor(private readonly options: NativeProcessOptions) {
-    this.processState = options.platform === "win32" ? "offline" : "unsupported";
+    this.processState = this.supportedHost() ? "offline" : "unsupported";
   }
 
   get status(): EngineStatus {
-    if (this.options.platform !== "win32") {
-      return { platform: this.options.platform, state: "unsupported", detail: "OpenUse controls Windows only.", canStart: false };
+    if (!this.supportedHost()) {
+      return { platform: this.options.platform, state: "unsupported", detail: "OpenUse supports macOS and Windows only.", canStart: false };
     }
+    const platformLabel = this.platformLabel();
     if (this.child && !this.child.killed) {
       return {
         platform: this.options.platform,
         state: this.processState === "starting" ? "starting" : "ready",
-        detail: this.processState === "starting" ? "Starting the Windows sidecar." : "Windows sidecar connected.",
+        detail: this.processState === "starting" ? `Starting the ${platformLabel} controller.` : `${platformLabel} controller connected.`,
         canStart: true,
         pid: this.child.pid ?? undefined,
         protocol: "json-lines/v1",
@@ -63,10 +64,12 @@ export class NativeEngineProcess implements ComputerRpc {
       platform: this.options.platform,
       state,
       detail: state === "offline" && this.hasAttemptedStart
-        ? "The Windows sidecar is offline; it will be restarted on the next action."
+        ? `The ${platformLabel} controller is offline; it will be restarted on the next action.`
         : available
-        ? "Windows sidecar is ready to start."
-        : "Publish the Windows sidecar with pnpm native:build.",
+        ? `${platformLabel} controller is ready to start.`
+        : this.options.platform === "darwin"
+          ? "Build the macOS controller with pnpm native:build:macos."
+          : "Publish the Windows sidecar with pnpm native:build.",
       canStart: available && state !== "stopped",
       protocol: "json-lines/v1",
       lastHeartbeatAt: this.lastHeartbeatAt,
@@ -83,14 +86,14 @@ export class NativeEngineProcess implements ComputerRpc {
     params: NativeMethodParams[M],
     signal?: AbortSignal,
   ): Promise<NativeMethodResult[M]> {
-    if (this.options.platform !== "win32") {
-      throw new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows computer engine is unavailable on this host.");
+    if (!this.supportedHost()) {
+      throw new OpenUseError("NATIVE_ENGINE_OFFLINE", "A native computer controller is unavailable on this host.");
     }
     if (signal?.aborted) throw new OpenUseError("TASK_CANCELLED", "The task was stopped.");
     await this.ensureStarted(signal);
     if (signal?.aborted) throw new OpenUseError("TASK_CANCELLED", "The task was stopped.");
     const child = this.child;
-    if (!child?.stdin.writable) throw new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar is offline.");
+    if (!child?.stdin.writable) throw new OpenUseError("NATIVE_ENGINE_OFFLINE", `The ${this.platformLabel()} controller is offline.`);
     const id = `native-${++this.sequence}`;
     this.lastAction = method;
     const payload = `${JSON.stringify({ id, method, params })}\n`;
@@ -126,11 +129,11 @@ export class NativeEngineProcess implements ComputerRpc {
           if (!this.pending.delete(id)) return;
           clearTimeout(timer);
           pending.cleanup();
-          reject(new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar could not receive the action.", error));
+          reject(new OpenUseError("NATIVE_ENGINE_OFFLINE", `The ${this.platformLabel()} controller could not receive the action.`, error));
         });
       } catch (error) {
         abort();
-        reject(new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar could not receive the action.", error));
+        reject(new OpenUseError("NATIVE_ENGINE_OFFLINE", `The ${this.platformLabel()} controller could not receive the action.`, error));
       }
     });
   }
@@ -176,7 +179,7 @@ export class NativeEngineProcess implements ComputerRpc {
     if (signal?.aborted) throw new OpenUseError("TASK_CANCELLED", "The task was stopped.");
     const enginePath = this.resolveEnginePath();
     if (!enginePath || !existsSync(enginePath)) {
-      throw new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar executable is not available.");
+      throw new OpenUseError("NATIVE_ENGINE_OFFLINE", `The ${this.platformLabel()} controller executable is not available.`);
     }
     this.hasAttemptedStart = true;
     this.processState = "starting";
@@ -195,11 +198,11 @@ export class NativeEngineProcess implements ComputerRpc {
         resolve();
       });
       child.on("error", (error) => {
-        if (!started) reject(new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar could not start.", error));
+        if (!started) reject(new OpenUseError("NATIVE_ENGINE_OFFLINE", `The ${this.platformLabel()} controller could not start.`, error));
         this.handleProcessExit(child, error);
       });
       child.once("exit", (code) => {
-        if (!started) reject(new OpenUseError("NATIVE_ENGINE_OFFLINE", `The Windows sidecar exited during startup (${code ?? "unknown"}).`));
+        if (!started) reject(new OpenUseError("NATIVE_ENGINE_OFFLINE", `The ${this.platformLabel()} controller exited during startup (${code ?? "unknown"}).`));
         this.handleProcessExit(child);
       });
     });
@@ -220,7 +223,7 @@ export class NativeEngineProcess implements ComputerRpc {
     } finally {
       removeAbortListener();
     }
-    if (this.child !== child) throw new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar stopped while starting.");
+    if (this.child !== child) throw new OpenUseError("NATIVE_ENGINE_OFFLINE", `The ${this.platformLabel()} controller stopped while starting.`);
     this.processState = "ready";
   }
 
@@ -229,12 +232,12 @@ export class NativeEngineProcess implements ComputerRpc {
     try {
       parsed = JSON.parse(line);
     } catch {
-      this.handleProtocolFailure(new OpenUseError("IPC_ERROR", "The Windows sidecar returned malformed JSON."));
+      this.handleProtocolFailure(new OpenUseError("IPC_ERROR", `The ${this.platformLabel()} controller returned malformed JSON.`));
       return;
     }
     const response = nativeResponseSchema.safeParse(parsed);
     if (!response.success) {
-      this.handleProtocolFailure(new OpenUseError("IPC_ERROR", "The Windows sidecar returned an invalid response."));
+      this.handleProtocolFailure(new OpenUseError("IPC_ERROR", `The ${this.platformLabel()} controller returned an invalid response.`));
       return;
     }
     this.lastHeartbeatAt = nowIso();
@@ -278,7 +281,7 @@ export class NativeEngineProcess implements ComputerRpc {
     this.child = undefined;
     this.lines?.close();
     this.lines = undefined;
-    this.failPending(new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar stopped unexpectedly.", cause));
+    this.failPending(new OpenUseError("NATIVE_ENGINE_OFFLINE", `The ${this.platformLabel()} controller stopped unexpectedly.`, cause));
     this.processState = "offline";
   }
 
@@ -289,18 +292,30 @@ export class NativeEngineProcess implements ComputerRpc {
     try {
       child.stdin.write(payload, "utf8", (error) => {
         if (!error || this.child !== child) return;
-        this.handleProtocolFailure(new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar could not receive cancellation."));
+        this.handleProtocolFailure(new OpenUseError("NATIVE_ENGINE_OFFLINE", `The ${this.platformLabel()} controller could not receive cancellation.`));
       });
     } catch {
-      if (this.child === child) this.handleProtocolFailure(new OpenUseError("NATIVE_ENGINE_OFFLINE", "The Windows sidecar could not receive cancellation."));
+      if (this.child === child) this.handleProtocolFailure(new OpenUseError("NATIVE_ENGINE_OFFLINE", `The ${this.platformLabel()} controller could not receive cancellation.`));
     }
   }
 
   private resolveEnginePath(): string | undefined {
     const configured = process.env.OPENUSE_NATIVE_ENGINE_PATH;
     if (configured) return configured;
+    if (this.options.platform === "darwin") {
+      if (!this.options.isPackaged) return join(this.options.appPath, "..", "..", "native", "macos", ".build", "release", "OpenUseMacController");
+      return join(this.options.resourcesPath, "native", "macos", "OpenUseMacController");
+    }
     if (!this.options.isPackaged) return join(this.options.appPath, "..", "..", "native", "windows", "publish", "OpenUse.WindowsController.exe");
     return join(this.options.resourcesPath, "native", "windows", "OpenUse.WindowsController.exe");
+  }
+
+  private supportedHost(): boolean {
+    return this.options.platform === "win32" || this.options.platform === "darwin";
+  }
+
+  private platformLabel(): string {
+    return this.options.platform === "darwin" ? "macOS" : "Windows";
   }
 }
 
@@ -309,5 +324,6 @@ function isKnownErrorCode(value: string): value is OpenUseError["code"] {
     "WINDOW_NOT_FOUND", "ELEMENT_NOT_FOUND", "APP_NOT_ALLOWED", "USER_DENIED", "ACTION_TIMEOUT",
     "MODEL_UNSUPPORTED", "MODEL_FAILED", "NATIVE_ENGINE_OFFLINE", "STALE_UI_STATE", "TASK_CANCELLED",
     "MAX_ACTIONS_REACHED", "INVALID_TOOL_INPUT", "CREDENTIAL_INTERACTION_DISABLED", "UNSUPPORTED_ACTION", "IPC_ERROR",
+    "ACCESSIBILITY_PERMISSION_REQUIRED", "SCREEN_RECORDING_PERMISSION_REQUIRED",
   ].includes(value);
 }

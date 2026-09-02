@@ -280,19 +280,19 @@ public sealed class WindowsComputerController
         {
             cancellationToken.ThrowIfCancellationRequested();
             ((InvokePattern)invoke).Invoke();
-            return new OperationResult(true, true, window, $"Invoked {ElementLabel(element)}.", "uia-native", targetElementId);
+            return new OperationResult(true, true, window, $"Invoked {ElementLabel(element)}.", "accessibility-native", targetElementId);
         }
         if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var selection))
         {
             cancellationToken.ThrowIfCancellationRequested();
             ((SelectionItemPattern)selection).Select();
-            return new OperationResult(true, true, window, $"Selected {ElementLabel(element)}.", "uia-native", targetElementId);
+            return new OperationResult(true, true, window, $"Selected {ElementLabel(element)}.", "accessibility-native", targetElementId);
         }
         if (element.TryGetCurrentPattern(TogglePattern.Pattern, out var toggle))
         {
             cancellationToken.ThrowIfCancellationRequested();
             ((TogglePattern)toggle).Toggle();
-            return new OperationResult(true, true, window, $"Toggled {ElementLabel(element)}.", "uia-native", targetElementId);
+            return new OperationResult(true, true, window, $"Toggled {ElementLabel(element)}.", "accessibility-native", targetElementId);
         }
         var bounds = ElementBounds(element);
         cancellationToken.ThrowIfCancellationRequested();
@@ -350,9 +350,9 @@ public sealed class WindowsComputerController
         catch { throw new NativeControllerException("UNSUPPORTED_ACTION", "OpenUse could not safely inspect the focused control before typing."); }
         EnsureNotCredentialElement(focused);
         if (target is not null && TrySetValue(target, input.Text))
-            return new OperationResult(true, true, null, $"Set {input.Text.Length} characters through UI Automation.", "uia-native", targetElementId);
+            return new OperationResult(true, true, null, $"Set {input.Text.Length} characters through UI Automation.", "accessibility-native", targetElementId);
         if (target is null && focused is not null && TrySetValue(focused, input.Text))
-            return new OperationResult(true, true, null, $"Set {input.Text.Length} characters through UI Automation.", "uia-native", targetElementId);
+            return new OperationResult(true, true, null, $"Set {input.Text.Length} characters through UI Automation.", "accessibility-native", targetElementId);
         SendUnicodeText(input.Text, cancellationToken);
         return new OperationResult(true, true, null, $"Typed {input.Text.Length} characters.", "keyboard-input", targetElementId);
     }

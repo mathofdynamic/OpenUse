@@ -1,21 +1,24 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { DEFAULT_MODEL_ID } from "@openuse/ai";
 import { defaultPermissionRecords, normalizeAppName } from "@openuse/permissions";
 import type { AppSettings, PermissionLevel, PermissionRecord, ProviderId } from "@openuse/shared";
 
 interface PersistedSettings {
-  version: 1;
+  version: 1 | 2;
   provider: ProviderId;
   modelId: string;
   permissions: PermissionRecord[];
 }
 
 const defaultSettings = (): PersistedSettings => ({
-  version: 1,
+  version: 2,
   provider: "vercel-gateway",
-  modelId: "openai/gpt-5.4",
+  modelId: DEFAULT_MODEL_ID,
   permissions: defaultPermissionRecords(),
 });
+
+const LEGACY_DEFAULT_MODEL_ID = "openai/gpt-5.4";
 
 export class SettingsStore {
   private value: PersistedSettings = defaultSettings();
@@ -26,12 +29,15 @@ export class SettingsStore {
     try {
       const parsed = JSON.parse(await readFile(this.filePath, "utf8")) as Partial<PersistedSettings>;
       const defaults = defaultSettings();
+      const storedModelId = typeof parsed.modelId === "string" && parsed.modelId ? parsed.modelId : undefined;
+      const migrateLegacyDefault = parsed.version === 1 && storedModelId === LEGACY_DEFAULT_MODEL_ID;
       this.value = {
-        version: 1,
+        version: 2,
         provider: parsed.provider === "vercel-gateway" ? parsed.provider : defaults.provider,
-        modelId: typeof parsed.modelId === "string" && parsed.modelId ? parsed.modelId : defaults.modelId,
+        modelId: migrateLegacyDefault ? defaults.modelId : storedModelId ?? defaults.modelId,
         permissions: Array.isArray(parsed.permissions) ? sanitizePermissions(parsed.permissions) : defaults.permissions,
       };
+      if (parsed.version !== 2 || migrateLegacyDefault) await this.persist();
     } catch (error) {
       if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
       await this.persist();

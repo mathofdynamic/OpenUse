@@ -216,7 +216,7 @@ export class MockComputerController implements ComputerController {
   async clickElement(input: NativeMethodParams["clickElement"], signal?: AbortSignal) {
     this.check(signal);
     this.record("clickElement", input);
-    return { ok: true as const, changed: true, interactionMethod: "uia-native" as const, targetElementId: input.elementId };
+    return { ok: true as const, changed: true, interactionMethod: "accessibility-native" as const, targetElementId: input.elementId };
   }
 
   async doubleClick(input: NativeMethodParams["doubleClick"], signal?: AbortSignal) {
@@ -229,7 +229,7 @@ export class MockComputerController implements ComputerController {
     this.check(signal);
     this.record("typeText", input);
     this.state.typedText.push(input.text);
-    return { ok: true as const, changed: true, interactionMethod: "uia-native" as const, targetElementId: input.elementId };
+    return { ok: true as const, changed: true, interactionMethod: "accessibility-native" as const, targetElementId: input.elementId };
   }
 
   async pressKey(input: NativeMethodParams["pressKey"], signal?: AbortSignal) {
@@ -255,7 +255,7 @@ export class UnavailableComputerController implements ComputerController {
   private fail(): never {
     throw new OpenUseError(
       "NATIVE_ENGINE_OFFLINE",
-      "The Windows computer engine is unavailable on this host.",
+      "The native computer engine is unavailable on this host.",
     );
   }
 

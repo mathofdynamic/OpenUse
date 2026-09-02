@@ -1,0 +1,14 @@
+{
+  "platform": "darwin",
+  "id": "macos-calculator",
+  "title": "macOS Calculator",
+  "task": "Open Calculator and calculate 37 × 19.",
+  "expectedOutcome": "macOS Calculator visibly shows 703 after the calculation is entered through its controls.",
+  "maxActions": 30,
+  "repeatCount": 3,
+  "criteria": [
+    "The numbers, multiplication, and equals operation are entered through OpenUse tools.",
+    "703 is read from a fresh Calculator UI observation.",
+    "The result is not produced by code-side arithmetic."
+  ]
+}

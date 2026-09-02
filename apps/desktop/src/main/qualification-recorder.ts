@@ -129,6 +129,7 @@ function redactEvent(event: RuntimeEvent): unknown {
           targetWindowTitle: event.debug.targetWindowTitle,
           targetElementId: event.debug.targetElementId,
           window: event.debug.window,
+          elements: event.debug.elements.map(({ value: _value, ...element }) => element),
           elementCount: event.debug.elements.length,
           truncated: event.debug.truncated,
           screenshot: event.debug.screenshot,

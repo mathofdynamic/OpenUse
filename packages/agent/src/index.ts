@@ -91,11 +91,11 @@ export type ComputerToolInput = {
 
 export const computerTools: ToolSet = {
   computer_list_apps: tool({
-    description: "List the visible Windows applications. Use this before launching an uncertain app.",
+    description: "List the visible desktop applications. Use this before launching an uncertain app.",
     inputSchema: schemas.computer_list_apps,
   }),
   computer_list_windows: tool({
-    description: "List current top-level Windows with stable window IDs, titles, and app names.",
+    description: "List current top-level application windows with stable window IDs, titles, and app identities.",
     inputSchema: schemas.computer_list_windows,
   }),
   computer_inspect_window: tool({
@@ -107,7 +107,7 @@ export const computerTools: ToolSet = {
     inputSchema: schemas.computer_capture_screen,
   }),
   computer_launch_app: tool({
-    description: "Launch a named Windows application. The runtime applies its own app permission policy.",
+    description: "Launch a named desktop application. The runtime applies its own app permission policy.",
     inputSchema: schemas.computer_launch_app,
   }),
   computer_focus_window: tool({
@@ -131,15 +131,15 @@ export const computerTools: ToolSet = {
     inputSchema: schemas.computer_type_text,
   }),
   computer_press_key: tool({
-    description: "Press one named key or a safe chord such as CTRL+S, ENTER, TAB, or ESCAPE.",
+    description: "Press one named key or a safe chord such as CMD+S, CTRL+S, ENTER, TAB, or ESCAPE.",
     inputSchema: schemas.computer_press_key,
   }),
   computer_scroll: tool({
-    description: "Scroll the focused Windows application by a bounded amount.",
+    description: "Scroll the focused application by a bounded amount.",
     inputSchema: schemas.computer_scroll,
   }),
   computer_wait: tool({
-    description: "Wait briefly for a Windows UI transition to settle.",
+    description: "Wait briefly for a desktop UI transition to settle.",
     inputSchema: schemas.computer_wait,
   }),
   computer_finish: tool({
@@ -150,11 +150,11 @@ export const computerTools: ToolSet = {
 
 export const COMPUTER_USE_INSTRUCTIONS = `You are the OpenUse Computer Use agent.
 
-Operate the user's Windows PC only through the provided computer_* tools.
+Operate the user's computer only through the provided computer_* tools.
 
 Behavior:
   - Inspect before acting whenever the current window, control, or result is uncertain.
-  - Prefer listWindows, inspectWindow, and clickElement using a fresh element ID, AutomationId, role, or exact name over coordinates.
+  - Prefer listWindows, inspectWindow, and clickElement using a fresh element ID, AutomationId, role, or exact name over coordinates. Element IDs are platform-neutral accessibility handles.
   - Never guess an element ID. If a window or dialog changed, inspect it again before acting.
   - Use small incremental steps. Do not emit a large macro or assume an action succeeded.
   - After important actions, inspect the affected window or use one screenshot when semantic data is insufficient.
@@ -163,7 +163,7 @@ Behavior:
 - Never ask for or type passwords, credentials, one-time codes, or secrets; that capability is disabled.
 - The runtime, not you, decides permissions and action risk. Do not claim an action is safe to bypass approval.
   - Do not repeat a successful action. After two similar failures, inspect instead of retrying blindly; retry a stale semantic action at most once after a fresh observation.
-  - Coordinates are a last resort. When using them, rely on the latest screenshot dimensions and coordinate-system note.
+  - Coordinates are a last resort. When using them, rely on the latest screenshot dimensions, scale factor, and coordinate-system note.
 - When the requested result is verified, call computer_finish with a short summary. Do not expose hidden chain-of-thought.
 - If the task cannot be completed safely, stop and explain why.
 `;
@@ -214,7 +214,7 @@ function screenshotOutput(screenshot: Screenshot, summary: string): ContentToolO
   return {
     type: "content",
     value: [
-      { type: "text", text: `${summary} Coordinates use ${screenshot.coordinateSystem} at ${screenshot.dpi} DPI; image pixels are ${screenshot.width}×${screenshot.height}, covering physical capture bounds (${x}, ${y}) ${width}×${height}; ${mapping}.` },
+      { type: "text", text: `${summary} Coordinates use ${screenshot.coordinateSystem} at ${screenshot.dpi} DPI${screenshot.scaleFactor ? ` and ${screenshot.scaleFactor}× scale` : ""}; image pixels are ${screenshot.width}×${screenshot.height}, covering desktop capture bounds (${x}, ${y}) ${width}×${height}; ${mapping}.` },
       {
         type: "file",
         mediaType: screenshot.mimeType,
@@ -314,8 +314,10 @@ export class ComputerUseAgent {
       messages = [...messages, ...generated.responseMessages];
 
       if (generated.toolCalls.length === 0) {
-        const summary = generated.text.trim() || "The task completed.";
-        return { status: "completed", summary, actionCount };
+        throw new OpenUseError(
+          "MODEL_FAILED",
+          "The model stopped without completing the task through OpenUse tools. It must verify the result and call computer_finish.",
+        );
       }
 
       let finished: AgentRunResult | undefined;
@@ -780,6 +782,7 @@ function screenshotDebug(screenshot: Screenshot): QualificationScreenshotSnapsho
     captureWidth: screenshot.captureBounds.width,
     captureHeight: screenshot.captureBounds.height,
     dpi: screenshot.dpi,
+    scaleFactor: screenshot.scaleFactor,
     coordinateSystem: screenshot.coordinateSystem,
   };
 }
@@ -789,7 +792,10 @@ function qualificationWindow(window: WindowInfo): QualificationWindowSnapshot {
 }
 
 function qualificationElement(element: WindowInspection["elements"][number]): QualificationElementSnapshot {
-  return element;
+  // Qualification evidence is intentionally metadata-only. Values can contain
+  // document text, so they must never be copied into the local debug stream.
+  const { value: _value, ...safeElement } = element;
+  return safeElement;
 }
 
 function failureSignature(input: unknown): string {

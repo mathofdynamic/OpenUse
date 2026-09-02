@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
 import { join } from "node:path";
 import { z } from "zod";
 import type { PermissionDecision, PermissionLevel, RuntimeEvent } from "@openuse/shared";
@@ -65,6 +65,19 @@ function installIpc(): void {
     assertSender(event);
     const { modelId } = modelSchema.parse(raw);
     return testGatewayConnection(() => secrets.read(), modelId);
+  });
+  ipcMain.handle("openuse:self-test", async (event) => {
+    assertSender(event);
+    await publishNativeSelfTest();
+  });
+  ipcMain.handle("openuse:open-mac-privacy", async (event, raw: unknown) => {
+    assertSender(event);
+    const area = z.object({ area: z.enum(["accessibility", "screen-recording"]) }).parse(raw).area;
+    if (process.platform !== "darwin") throw new OpenUseError("UNSUPPORTED_ACTION", "macOS privacy settings are only available on macOS.");
+    const url = area === "accessibility"
+      ? "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+      : "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
+    await shell.openExternal(url);
   });
   ipcMain.handle("openuse:start-task", async (event, raw: unknown) => {
     assertSender(event);
@@ -136,36 +149,40 @@ async function bootstrap(): Promise<void> {
   });
   installIpc();
   createWindow();
-  if (qualification.enabled && process.platform === "win32") {
-    void engine.selfTest().then((result) => {
-      qualificationSelfTest = result;
-      const event: RuntimeEvent = { type: "qualification.self-test", result, at: nowIso() };
-      qualification.recordSelfTest(result);
-      logRuntimeEvent(event, true);
-      mainWindow?.webContents.send("openuse:event", event);
-      const statusEvent: RuntimeEvent = { type: "engine.status", status: engine.status, at: nowIso() };
-      qualification.record(statusEvent);
-      mainWindow?.webContents.send("openuse:event", statusEvent);
-    }).catch((error) => {
-      const result: EngineSelfTestResult = {
-        ok: false,
-        uiAutomationAvailable: false,
-        windowEnumerationAvailable: false,
-        screenEnumerationAvailable: false,
-        screenshotAvailable: false,
-        dpiAvailable: false,
-        inputApisAvailable: false,
-        monitorCount: 0,
-        monitors: [],
-        detail: error instanceof Error ? error.message : "The native self-test failed.",
-      };
-      qualificationSelfTest = result;
-      const event: RuntimeEvent = { type: "qualification.self-test", result, at: nowIso() };
-      qualification.recordSelfTest(result);
-      logRuntimeEvent(event, true);
-      mainWindow?.webContents.send("openuse:event", event);
-    });
+  // macOS self-tests run on every desktop launch so the UI can distinguish a
+  // missing Accessibility/Screen Recording grant from an offline controller.
+  // Windows keeps the existing qualification-only behavior to avoid changing
+  // its normal startup path.
+  if (process.platform === "darwin" || (qualification.enabled && process.platform === "win32")) void publishNativeSelfTest();
+}
+
+async function publishNativeSelfTest(): Promise<void> {
+  let result: EngineSelfTestResult;
+  try {
+    result = await engine.selfTest();
+  } catch (error) {
+    result = {
+      ok: false,
+      uiAutomationAvailable: false,
+      windowEnumerationAvailable: false,
+      screenEnumerationAvailable: false,
+      screenshotAvailable: false,
+      dpiAvailable: false,
+      inputApisAvailable: false,
+      monitorCount: 0,
+      monitors: [],
+      platform: process.platform,
+      detail: error instanceof Error ? error.message : "The native self-test failed.",
+    };
   }
+  qualificationSelfTest = result;
+  const event: RuntimeEvent = { type: "qualification.self-test", result, at: nowIso() };
+  qualification.recordSelfTest(result);
+  logRuntimeEvent(event, !app.isPackaged);
+  mainWindow?.webContents.send("openuse:event", event);
+  const statusEvent: RuntimeEvent = { type: "engine.status", status: engine.status, at: nowIso() };
+  qualification.record(statusEvent);
+  mainWindow?.webContents.send("openuse:event", statusEvent);
 }
 
 void bootstrap().catch((error) => {

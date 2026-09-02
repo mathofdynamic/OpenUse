@@ -1,0 +1,14 @@
+{
+  "platform": "darwin",
+  "id": "macos-textedit-typing",
+  "title": "macOS TextEdit typing",
+  "task": "Open TextEdit and type \"Hello from OpenUse\"",
+  "expectedOutcome": "A visible TextEdit document contains exactly Hello from OpenUse.",
+  "maxActions": 30,
+  "repeatCount": 3,
+  "criteria": [
+    "The task finishes through the OpenUse agent.",
+    "The text is verified from a fresh UI observation.",
+    "No manual interaction with TextEdit is used except permission decisions."
+  ]
+}

@@ -19,10 +19,16 @@ type TimelineEntry =
   | { kind: "user"; id: string; command: string }
   | { kind: "action"; action: TimelineAction };
 
-const STARTER_COMMANDS = [
+const WINDOWS_STARTER_COMMANDS = [
   "Open Notepad and type \"Hello from OpenUse\"",
   "Open Calculator and calculate 37 × 19",
   "Open Notepad, type \"OpenUse test file\", and save it as openuse-test.txt on my Desktop.",
+];
+
+const MACOS_STARTER_COMMANDS = [
+  "Open TextEdit and type \"Hello from OpenUse\"",
+  "Open Calculator and calculate 37 × 19",
+  "Open TextEdit, type \"OpenUse test file\", and save it as openuse-test.txt on my Desktop.",
 ];
 
 const emptyEngine: EngineStatus = {
@@ -46,13 +52,15 @@ const browserPreviewBridge: Window["openuse"] = {
     engine: {
       platform: "browser-preview",
       state: "unsupported",
-      detail: "OpenUse's desktop bridge is available inside Electron only. Open the desktop app to control Windows.",
+      detail: "OpenUse's desktop bridge is available inside Electron only.",
     },
     qualification: emptyQualification,
   }),
   setModel: async () => undefined,
   saveGatewayApiKey: async () => { throw new Error("Settings are available in the OpenUse desktop app."); },
   testGatewayConnection: async () => { throw new Error("Settings are available in the OpenUse desktop app."); },
+  runSelfTest: async () => { throw new Error("Diagnostics are available in the OpenUse desktop app."); },
+  openMacPrivacy: async () => { throw new Error("macOS privacy settings are available in the OpenUse desktop app."); },
   startTask: async () => { throw new Error("Computer control is available in the OpenUse desktop app."); },
   stopTask: async () => undefined,
   decidePermission: async () => undefined,
@@ -113,7 +121,10 @@ export function App() {
   const modelCompatible = activeModel.capabilities.toolCalling && activeModel.capabilities.vision;
   const isRunning = status === "running";
   const engineCanStart = engine.state === "ready" || engine.canStart === true;
-  const canRun = Boolean(command.trim()) && !isRunning && settings.apiKeyConfigured && modelCompatible && engineCanStart;
+  const platformLabel = platformName(engine.platform);
+  const starterCommands = engine.platform === "darwin" ? MACOS_STARTER_COMMANDS : WINDOWS_STARTER_COMMANDS;
+  const nativePermissionsReady = engine.platform !== "darwin" || selfTest?.ok !== false;
+  const canRun = Boolean(command.trim()) && !isRunning && settings.apiKeyConfigured && modelCompatible && engineCanStart && nativePermissionsReady;
 
   async function runTask() {
     if (!canRun) {
@@ -121,7 +132,9 @@ export function App() {
         setSettingsOpen(true);
         setError("Add your AI Gateway API key in Settings to run a task.");
       } else if (!engineCanStart) {
-        setError("The Windows engine is not available on this host.");
+        setError(engine.detail || `The ${platformLabel} controller is not available on this host.`);
+      } else if (!nativePermissionsReady) {
+        setError(selfTest?.detail ?? "Grant the required macOS privacy permissions before running Computer Use.");
       } else if (!modelCompatible) {
         setError("Choose a model with both tool calling and vision support for Computer Use.");
       }
@@ -209,8 +222,8 @@ export function App() {
         <div className="rail-spacer" />
         <div className="rail-note">
           <div className="rail-note-heading"><span className={`status-dot status-${engine.state}`} />Local runtime</div>
-          <p>{engine.state === "ready" ? "Windows control is connected." : engine.detail}</p>
-          <div className="rail-version">OpenUse MVP · Windows only</div>
+          <p>{engine.state === "ready" ? `${platformLabel} control is connected.` : engine.detail}</p>
+          <div className="rail-version">OpenUse MVP · {platformLabel}</div>
         </div>
       </aside>
 
@@ -219,7 +232,7 @@ export function App() {
           <div className="mobile-brand"><div className="brand-mark small" aria-hidden="true"><span /></div><span>OpenUse</span></div>
           <div className="topbar-context">
             <span className={`status-dot status-${engine.state}`} />
-            <span>{engine.state === "ready" ? "Windows engine ready" : engine.state === "unsupported" ? "Windows engine unavailable" : "Windows engine offline"}</span>
+            <span>{engine.state === "ready" ? `${platformLabel} control ready` : engine.state === "unsupported" ? `${platformLabel} control unavailable` : `${platformLabel} control offline`}</span>
           </div>
           <div className="topbar-actions">
             <label className="model-picker compact-picker">
@@ -244,7 +257,7 @@ export function App() {
             <div>
               <div className="eyebrow"><span className="eyebrow-line" />Local Computer Use</div>
               <h1 id="page-title">Put the next action in motion.</h1>
-              <p className="intro-copy">Give OpenUse a clear command. It observes your Windows desktop, acts through guarded tools, and shows you what changed.</p>
+              <p className="intro-copy">Give OpenUse a clear command. It observes your desktop, acts through guarded tools, and shows you what changed.</p>
             </div>
             <div className="intro-meta">
               <div className="meta-label">Active model</div>
@@ -257,6 +270,7 @@ export function App() {
           </section>
 
           {error && <div className="inline-alert" role="alert"><Glyph name="alert" /><span>{error}</span><button type="button" onClick={() => setError(undefined)} aria-label="Dismiss error">×</button></div>}
+          {engine.platform === "darwin" && selfTest && !selfTest.ok && <div className="inline-alert" role="alert"><Glyph name="alert" /><span>{selfTest.detail ?? "macOS privacy permissions are required for Computer Use."}</span>{selfTest.accessibilityPermission === "denied" && <button type="button" onClick={() => void runtimeApi.openMacPrivacy("accessibility")}>Accessibility settings</button>}{selfTest.screenRecordingPermission === "denied" && <button type="button" onClick={() => void runtimeApi.openMacPrivacy("screen-recording")}>Screen Recording settings</button>}<button type="button" onClick={() => void runtimeApi.runSelfTest()}>Recheck</button></div>}
 
           <div className="workspace-grid">
             <section className="activity-surface" aria-labelledby="activity-heading">
@@ -270,7 +284,7 @@ export function App() {
 
               <div className="timeline" aria-live="polite">
                 {entries.length === 0 ? (
-                  <EmptyActivity onStarter={useStarter} />
+                        <EmptyActivity commands={starterCommands} onStarter={useStarter} />
                 ) : (
                   entries.map((entry) => entry.kind === "user"
                     ? <UserEntry key={entry.id} command={entry.command} />
@@ -308,8 +322,8 @@ export function App() {
             <aside className="inspector-column" aria-label="Runtime details">
               <section className="inspector-section engine-section">
                 <div className="section-heading"><span className="section-icon"><Glyph name="desktop" /></span><span>Control surface</span></div>
-                <div className="engine-title"><span className={`large-status-dot status-${engine.state}`} />{engine.state === "ready" ? "Windows desktop" : "Windows only"}</div>
-                <p className="engine-copy">{engine.state === "ready" ? "Actions stay local. OpenUse uses UI Automation first, with screenshots only when the model asks." : engine.detail}</p>
+                <div className="engine-title"><span className={`large-status-dot status-${engine.state}`} />{engine.state === "ready" ? `${platformLabel} desktop` : `${platformLabel} control`}</div>
+                <p className="engine-copy">{engine.state === "ready" ? "Actions stay local. OpenUse uses native accessibility first, with screenshots only when the model asks." : engine.detail}</p>
                 <div className="engine-rule" />
                 <div className="engine-foot"><span>Protocol</span><strong>JSON-lines / stdio</strong></div>
               </section>
@@ -415,13 +429,13 @@ function handleRuntimeEvent(
   }
 }
 
-function EmptyActivity({ onStarter }: { onStarter(value: string): void }) {
+function EmptyActivity({ commands, onStarter }: { commands: string[]; onStarter(value: string): void }) {
   return <div className="empty-activity">
     <div className="empty-orbit" aria-hidden="true"><span className="orbit-core" /><span className="orbit-ring ring-one" /><span className="orbit-ring ring-two" /></div>
     <div className="empty-title">Your computer, on request.</div>
     <p>Start with a small task. OpenUse will observe, act, and verify each step.</p>
     <div className="starter-list">
-      {STARTER_COMMANDS.map((starter) => <button type="button" key={starter} onClick={() => onStarter(starter)}>{starter}<Glyph name="arrow" /></button>)}
+      {commands.map((starter) => <button type="button" key={starter} onClick={() => onStarter(starter)}>{starter}<Glyph name="arrow" /></button>)}
     </div>
   </div>;
 }
@@ -497,9 +511,9 @@ function SettingsDialog({
     <div className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1} ref={dialogRef}>
       <div className="dialog-topline"><div><div className="dialog-eyebrow">OpenUse configuration</div><h2 id="settings-title">Settings</h2></div><button className="close-button" type="button" aria-label="Close Settings" onClick={onClose}>×</button></div>
       <p className="settings-lede">Choose the model that reasons over your desktop. The key stays encrypted in Electron's main process.</p>
-      <div className="settings-field"><label htmlFor="provider">AI provider</label><div className="field-readonly" id="provider">Vercel AI Gateway <span className="configured-tag">Connected by key</span></div></div>
+      <div className="settings-field"><label htmlFor="provider">AI provider</label><div className="field-readonly" id="provider">Vercel AI Gateway <span className={`configured-tag ${settings.apiKeyConfigured ? "" : "connection-failure"}`}>{settings.apiKeyConfigured ? "Connected by key" : "Setup required"}</span></div></div>
       <div className="settings-field"><label htmlFor="settings-model">Model</label><div className="select-wrap"><select id="settings-model" value={modelId} onChange={(event) => setModelId(event.target.value)}>{MODEL_CATALOG.map((model) => <option value={model.id} key={model.id}>{model.label}</option>)}</select><Glyph name="chevron" /></div><div className="field-note">Computer Use requires tool calling and vision.</div></div>
-      <div className="settings-field"><label htmlFor="gateway-key">API key</label><input id="gateway-key" type="password" autoComplete="off" value={apiKeyDraft} onChange={(event) => onApiKeyChange(event.target.value)} placeholder={settings.apiKeyConfigured ? "Key saved — enter a new key to replace it" : "Paste your AI_GATEWAY_API_KEY"} /><div className="field-note"><Glyph name="lock" /> Stored locally with OS-backed encryption. Never returned to the renderer.</div></div>
+      <div className="settings-field"><label htmlFor="gateway-key">API key</label><input id="gateway-key" type="password" autoComplete="off" value={apiKeyDraft} onChange={(event) => onApiKeyChange(event.target.value)} placeholder={settings.apiKeyConfigured ? "Key saved — enter a new key to replace it" : "Paste your AI_GATEWAY_API_KEY"} /><div className="field-note"><Glyph name="lock" /> Stored locally with OS-backed encryption. Never returned to the renderer.</div><div className="field-note">Use a Vercel AI Gateway key; provider API keys are not interchangeable.</div></div>
       <div className="connection-test"><button className="secondary-action" type="button" disabled={connectionTest === "testing"} onClick={() => onTestConnection(modelId)}>{connectionTest === "testing" ? "Testing…" : "Test connection"}</button>{connectionTest !== "idle" && connectionTest !== "testing" && <span className={connectionTest.ok ? "connection-success" : "connection-failure"}>{connectionTest.message}</span>}</div>
       <div className="settings-divider" />
       <div className="permissions-heading"><div><div className="dialog-eyebrow">Application permissions</div><h3>Who can OpenUse control?</h3></div><span className="permissions-count">{settings.permissions.length} rules</span></div>
@@ -512,16 +526,17 @@ function SettingsDialog({
 type ConnectionTestState = "idle" | "testing" | GatewayConnectionResult;
 
 function QualificationPanel({ engine, debug, selfTest }: { engine: EngineStatus; debug?: QualificationDebugSnapshot; selfTest?: EngineSelfTestResult }) {
+  const platformLabel = platformName(engine.platform);
   return <section className="inspector-section qualification-section">
     <div className="section-heading"><span className="section-icon"><Glyph name="tool" /></span><span>Qualification mode</span></div>
-    <div className="qualification-status"><span className={`status-dot status-${engine.state}`} />Windows controller <strong>{engine.state === "ready" ? "Connected" : engine.state === "offline" ? "Offline" : engine.state}</strong></div>
+    <div className="qualification-status"><span className={`status-dot status-${engine.state}`} />{platformLabel} controller <strong>{engine.state === "ready" ? "Connected" : engine.state === "offline" ? "Offline" : engine.state}</strong></div>
     <div className="qualification-grid">
       <span>PID</span><strong>{engine.pid ?? "—"}</strong>
       <span>Protocol</span><strong>{engine.protocol ?? "—"}</strong>
       <span>Heartbeat</span><strong>{engine.lastHeartbeatAt ? formatTimestamp(engine.lastHeartbeatAt) : "—"}</strong>
       <span>Last action</span><strong>{engine.lastAction ?? "—"}</strong>
     </div>
-    {selfTest && <><div className={`self-test-result ${selfTest.ok ? "self-test-pass" : "self-test-fail"}`}><span>{selfTest.ok ? "Self-test passed" : "Self-test failed"}</span><span>{selfTest.monitorCount} monitor{selfTest.monitorCount === 1 ? "" : "s"}</span></div><div className="self-test-details">{selfTest.monitors.map((monitor) => <span key={monitor.index}>Display {monitor.index + 1}: {monitor.dpi} DPI · {monitor.bounds.width}×{monitor.bounds.height} at ({monitor.bounds.x}, {monitor.bounds.y})</span>)}{selfTest.screenshot && <span>Capture: {selfTest.screenshot.width}×{selfTest.screenshot.height} · origin ({selfTest.screenshot.captureBounds.x}, {selfTest.screenshot.captureBounds.y})</span>}</div></>}
+    {selfTest && <><div className={`self-test-result ${selfTest.ok ? "self-test-pass" : "self-test-fail"}`}><span>{selfTest.ok ? "Self-test passed" : "Self-test failed"}</span><span>{selfTest.monitorCount} monitor{selfTest.monitorCount === 1 ? "" : "s"}</span></div><div className="self-test-details">{selfTest.accessibilityPermission && <span>Accessibility: {selfTest.accessibilityPermission}</span>}{selfTest.screenRecordingPermission && <span>Screen Recording: {selfTest.screenRecordingPermission}</span>}{selfTest.monitors.map((monitor) => <span key={monitor.index}>Display {monitor.index + 1}: {monitor.dpi} DPI{monitor.scaleFactor ? ` · ${monitor.scaleFactor}×` : ""} · {monitor.bounds.width}×{monitor.bounds.height} at ({monitor.bounds.x}, {monitor.bounds.y})</span>)}{selfTest.screenshot && <span>Capture: {selfTest.screenshot.width}×{selfTest.screenshot.height} · origin ({selfTest.screenshot.captureBounds.x}, {selfTest.screenshot.captureBounds.y}){selfTest.screenshot.scaleFactor ? ` · ${selfTest.screenshot.scaleFactor}×` : ""}</span>}</div></>}
     {debug && <>
       <div className="debug-rule" />
       <div className="debug-label">Last runtime observation</div>
@@ -529,7 +544,7 @@ function QualificationPanel({ engine, debug, selfTest }: { engine: EngineStatus;
       <div className="debug-summary"><span>Method</span><strong>{debug.interactionMethod ?? "not an interaction"}</strong></div>
       {debug.targetElementId && <div className="debug-summary"><span>Element</span><strong>{debug.targetElementId}</strong></div>}
       {debug.window && <div className="debug-window"><strong>{debug.window.title || debug.window.app}</strong><span>{debug.window.app} · {debug.window.bounds.width}×{debug.window.bounds.height} at ({debug.window.bounds.x}, {debug.window.bounds.y})</span></div>}
-      {debug.screenshot && <div className="debug-window"><strong>Screenshot</strong><span>{debug.screenshot.width}×{debug.screenshot.height} px · origin ({debug.screenshot.originX}, {debug.screenshot.originY}) · {debug.screenshot.dpi} DPI</span></div>}
+      {debug.screenshot && <div className="debug-window"><strong>Screenshot</strong><span>{debug.screenshot.width}×{debug.screenshot.height} px · origin ({debug.screenshot.originX}, {debug.screenshot.originY}) · {debug.screenshot.dpi} DPI{debug.screenshot.scaleFactor ? ` · ${debug.screenshot.scaleFactor}×` : ""}</span></div>}
       <div className="debug-label">Normalized elements ({debug.elements.length}{debug.truncated ? "+" : ""})</div>
       <div className="debug-elements" role="region" aria-label="Normalized UI Automation elements">{debug.elements.slice(0, 40).map((element) => <div className="debug-element" key={element.id}><strong>{element.id}</strong><span>{element.role} · {element.name || "(unnamed)"}</span><small>{element.automationId || element.className || "—"} · {element.bounds.x},{element.bounds.y} {element.bounds.width}×{element.bounds.height}</small>{element.value && <small>value: {element.value}</small>}</div>)}</div>
     </>}
@@ -539,6 +554,10 @@ function QualificationPanel({ engine, debug, selfTest }: { engine: EngineStatus;
 
 function formatTimestamp(value: string): string {
   return value.replace("T", " ").replace("Z", " UTC");
+}
+
+function platformName(platform: string): string {
+  return platform === "darwin" ? "macOS" : platform === "win32" ? "Windows" : platform === "unknown" ? "Desktop" : platform;
 }
 
 function statusLabel(status: AgentStatus): string {

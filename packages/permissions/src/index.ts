@@ -26,12 +26,14 @@ export interface AuthorizationInput {
   reason: string;
 }
 
-const DEFAULT_PERMISSION_LEVELS: Array<Pick<PermissionRecord, "appName" | "level">> = [
+const DEFAULT_PERMISSION_LEVELS: Array<Pick<PermissionRecord, "appName" | "level" | "appIdentity">> = [
   { appName: "Notepad", level: "ALLOW" },
   { appName: "Calculator", level: "ALLOW" },
   { appName: "Explorer", level: "ASK" },
   { appName: "Chrome", level: "ASK" },
   { appName: "Password Manager", level: "DENY" },
+  { appName: "TextEdit", appIdentity: "bundle:com.apple.TextEdit", level: "ALLOW" },
+  { appName: "Finder", appIdentity: "bundle:com.apple.finder", level: "ALLOW" },
 ];
 
 export function normalizeAppName(value: string): string {

@@ -10,7 +10,7 @@ pnpm test
 pnpm build
 ```
 
-`pnpm dev` starts the Vite renderer and Electron shell. In an unpackaged Windows development run it automatically resolves `native/windows/publish/OpenUse.WindowsController.exe`; set `OPENUSE_NATIVE_ENGINE_PATH` when using another location. The Electron main process launches the sidecar on the first task, not at application startup.
+`pnpm dev` starts the Vite renderer and Electron shell. In an unpackaged run it resolves the native controller for the current host: `native/windows/publish/OpenUse.WindowsController.exe` on Windows or `native/macos/.build/release/OpenUseMacController` on macOS. Set `OPENUSE_NATIVE_ENGINE_PATH` when intentionally testing another controller. macOS runs a safe self-test at startup so missing privacy grants are visible before a task can run.
 
 ## Windows sidecar
 
@@ -77,6 +77,22 @@ The process opened successfully and was stopped with Ctrl-C. Browser-preview UI 
 The Windows-targeted native projects were cross-built on the development host with .NET 10.0.400, but native tests and UI Automation cannot execute on macOS. Run `pnpm native:test` and `pnpm test:windows` on Windows before shipping the sidecar.
 
 The Windows-only commands intentionally refuse to run on macOS or Linux. A future Windows session must run `pnpm verify:windows` rather than treating a cross-build as native qualification.
+
+## macOS controller
+
+On macOS, run:
+
+```bash
+pnpm setup:macos
+pnpm verify:macos
+pnpm dev
+```
+
+The Swift sidecar is built with the system Swift toolchain and uses `AXUIElement`/ApplicationServices for accessibility, AppKit/NSWorkspace for applications and windows, CoreGraphics for display capture and input, and CGEvent keyboard/mouse events only as fallbacks. Grant Accessibility and Screen Recording to the OpenUse development process in System Settings > Privacy & Security; the application has buttons to open each pane and a Recheck action. `pnpm test:macos` checks protocol behavior even when privacy grants are not present; `pnpm verify:macos` requires both grants and will report `NOT READY FOR GUI QUALIFICATION` otherwise.
+
+The macOS coordinate model is global desktop points for accessibility bounds and CGEvent input. Captures are physical-pixel images with a `scaleFactor`; the agent receives the explicit mapping between image pixels and point-space capture bounds. The self-test records monitor count, bounds, and scale without moving the pointer or changing display settings.
+
+`pnpm qualify:macos` runs the three TextEdit/Calculator goals three times each and writes redacted evidence under `.openuse/qualification/`. It also guides Stop, permission, Retina, vision-fallback, and multi-monitor checks. It never injects an action sequence or infers a visible success.
 
 ## Current verification environment
 

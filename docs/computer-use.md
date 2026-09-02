@@ -1,21 +1,33 @@
 # Computer Use runtime
 
+## Platform-neutral controller
+
+The agent and permission engine use one `ComputerController` contract. The Electron main process selects the native implementation from `process.platform`:
+
+```text
+ComputerController
+├── MacComputerController  → Swift / macOS Accessibility, CoreGraphics, AppKit
+└── WindowsComputerController → .NET 8 / UI Automation, Win32 capture and input
+```
+
+Both implementations use the same JSON-lines sidecar boundary and return the same normalized windows, elements, screenshots, errors, and interaction telemetry. The model never receives an OS handle or unrestricted system access.
+
 ## Observation priority
 
-The Windows sidecar follows this order:
+Each native controller follows this order:
 
-1. Windows UI Automation and accessibility properties.
-2. Semantic element actions (`InvokePattern`, `SelectionItemPattern`, `TogglePattern`, `ExpandCollapsePattern`, `ScrollItemPattern`, or `ValuePattern`, then element bounds).
+1. Native accessibility information (macOS AXUIElement or Windows UI Automation).
+2. Semantic element actions (AXPress/AXSetValue/AXRaise or InvokePattern/ValuePattern/SelectionItemPattern/TogglePattern), then element bounds.
 3. A bounded screenshot when the model explicitly asks for visual feedback.
 4. Raw coordinates only when the caller explicitly uses `computer_click` or semantic interaction falls back to element bounds.
 
-`inspectWindow` returns a pruned tree: stable element ID, parent ID, role, bounded name/value, AutomationId, class name, bounds, enabled/offscreen state, and supported native patterns. It does not send the raw accessibility tree or process executable paths to the model. Visible owned dialogs are retained in `listWindows`, so transient states such as Notepad's Save As dialog can be observed and verified. Element IDs use the Windows UI Automation runtime ID when available; if a control disappears, the native side returns a stale/not-found error rather than reusing old bounds.
+`inspectWindow` returns a pruned tree: stable element ID, parent ID, role, subrole/class, bounded name/value, AutomationId where available, bounds, enabled/offscreen/focused state, and supported native actions/patterns. It does not send the raw accessibility tree or process executable paths to the model. Visible dialogs are retained in `listWindows`, so transient states such as TextEdit's Save dialog and Notepad's Save As dialog can be observed and verified. Element IDs are valid for the inspected UI state; if a control disappears or its fingerprint changes, the native side returns a stale/not-found error rather than reusing old bounds.
 
-Window observations include process ID, process name, class name, and an application identity used by the permission engine. Win32 identities use executable plus top-level class; packaged-window identities use a packaged identity fallback when Windows exposes only `ApplicationFrameHost`.
+Window observations include process ID, process name, class name, and an application identity used by the permission engine. Windows identities use executable plus top-level class; macOS identities prefer `bundle:<bundle identifier>` and only use a process fallback when macOS does not expose a bundle ID.
 
-Screen captures are reduced to a maximum width of 1440 pixels for model input, but retain `captureBounds` in virtual-screen physical pixels. The tool result tells the model how to map image coordinates back to desktop coordinates, including the capture origin for window screenshots; it must not treat a reduced image as a 1:1 desktop surface. The controller sets PerMonitorV2 before using UI Automation or capture APIs, so the mapping is deliberately expressed in physical virtual-screen pixels.
+Screen captures are reduced to a maximum width of 1440 pixels for model input, but retain `captureBounds`, `coordinateSystem`, and `scaleFactor`. Windows uses virtual-screen physical pixels after PerMonitorV2 initialization. macOS uses global desktop points for AX and CGEvent coordinates while the captured CGImage reports physical pixels; the mapping sent to the model converts image pixels back to the point-space capture bounds. This distinction is required on Retina displays and across monitor origins.
 
-Every completed interaction reports the method that actually ran: `uia-native` for a UI Automation pattern or ValuePattern, `element-coordinate` when a found semantic element required its bounds, `vision-coordinate` when a coordinate action follows a current screenshot observation, `coordinate-input` for a direct coordinate action, and `keyboard-input` for bounded key input. The agent does not infer this from the model's tool name.
+Every completed interaction reports the method that actually ran: `accessibility-native` for a native AX/UI Automation action or value set, `element-coordinate` when a found semantic element required its bounds, `vision-coordinate` when a coordinate action follows a current screenshot observation, `coordinate-input` for a direct coordinate action, and `keyboard-input` for bounded key input. The agent does not infer this from the model's tool name.
 
 ## Tool protocol
 
@@ -48,6 +60,6 @@ The runtime stops after 30 tool calls, on cancellation, or on a terminal failure
 
 ## Native self-test and qualification diagnostics
 
-The sidecar's `selfTest` command is internal to the runtime and is not an AI-facing tool. It checks UI Automation availability, window and monitor enumeration, one disposable screen capture, DPI detection, and a non-invasive input API call (`GetCursorPos`; it does not move the pointer). It returns `ok: false` when a capability is unavailable instead of claiming a pass. `pnpm test:windows` requires this self-test to pass on the interactive Windows host.
+The sidecar's `selfTest` command is internal to the runtime and is not an AI-facing tool. Windows checks UI Automation, window and monitor enumeration, one disposable screen capture, DPI detection, and a non-invasive input API call. macOS checks AX trust, Screen Recording trust, application/window/display enumeration, one disposable capture, Retina scale data, and CGEvent initialization. It returns `ok: false` when a capability or privacy grant is unavailable instead of claiming a pass. The platform preflight requires all capabilities before GUI qualification.
 
-When `OPENUSE_QUALIFICATION_MODE=1`, the Electron app displays the same normalized elements sent to the model, native PID/protocol/heartbeat status, actual interaction method, window bounds, and screenshot dimensions/origin/DPI. The recorder persists only redacted metrics; screenshot pixels and UI element values are not written to the qualification report.
+When `OPENUSE_QUALIFICATION_MODE=1`, the Electron app displays the same normalized elements sent to the model, native PID/protocol/heartbeat status, actual interaction method, window bounds, screenshot dimensions/origin/DPI/scale, and macOS permission state where relevant. The recorder persists only redacted metrics; screenshot pixels and UI element values are not written to the qualification report.

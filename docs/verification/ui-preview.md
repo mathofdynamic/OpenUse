@@ -10,4 +10,4 @@ Observed states through the preview bridge:
 - A starter command fills the real composer; the action control remains guarded when the desktop bridge or Gateway key is unavailable.
 - At 640px wide the side rail is hidden, the layout becomes one column, and the inspector sections stack without horizontal overflow.
 
-The preview deliberately has no Electron bridge. It reports the Windows engine as unavailable and rejects task execution, so this artifact is UI evidence only, not evidence that computer actions were performed.
+The preview deliberately has no Electron bridge. It reports the native engine as unavailable and rejects task execution, so this artifact is UI evidence only, not evidence that computer actions were performed.

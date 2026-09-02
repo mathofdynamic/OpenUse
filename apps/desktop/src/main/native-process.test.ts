@@ -25,9 +25,9 @@ async function fakeSidecar(body: string): Promise<string> {
   return path;
 }
 
-function createEngine(): NativeEngineProcess {
+function createEngine(platform: "win32" | "darwin" = "win32"): NativeEngineProcess {
   const engine = new NativeEngineProcess({
-    platform: "win32",
+    platform,
     isPackaged: false,
     appPath: "/tmp/openuse-test-app",
     resourcesPath: "/tmp/openuse-test-resources",
@@ -37,6 +37,16 @@ function createEngine(): NativeEngineProcess {
 }
 
 describe("native sidecar process boundary", () => {
+  it("starts the configured macOS controller through the same protocol boundary", async () => {
+    await fakeSidecar("IFS= read -r request\nprintf '%s\\n' '{\"id\":\"native-1\",\"ok\":true,\"result\":{\"windows\":[]}}'");
+    const engine = createEngine("darwin");
+
+    await expect(engine.request("listWindows", {})).resolves.toEqual({ windows: [] });
+    expect(engine.status.platform).toBe("darwin");
+    expect(engine.status.state).toBe("ready");
+    expect(engine.status.detail).toContain("macOS");
+  });
+
   it("reports an unavailable executable without waiting on a request timeout", async () => {
     const directory = await mkdtemp(join(tmpdir(), "openuse-native-process-"));
     temporaryDirectories.push(directory);

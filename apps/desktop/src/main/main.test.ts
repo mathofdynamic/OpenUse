@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { DEFAULT_MODEL_ID } from "@openuse/ai";
 import { defaultPermissionRecords } from "@openuse/permissions";
 import type { SafeStorageAdapter } from "./secure-store";
 import { GatewaySecretStore } from "./secure-store";
@@ -43,6 +44,7 @@ describe("desktop local stores", () => {
     const store = new SettingsStore(join(directory, "settings.json"));
 
     await store.initialize();
+    expect(store.persisted.modelId).toBe(DEFAULT_MODEL_ID);
     expect(store.persisted.permissions.map(({ appName, level }) => ({ appName, level }))).toEqual(
       defaultPermissionRecords().map(({ appName, level }) => ({ appName, level })),
     );

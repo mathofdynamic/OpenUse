@@ -151,7 +151,7 @@ The event stream is redacted at the Electron main-process boundary. It contains 
 
 Interaction method is recorded from the native response, not the model request:
 
-- `uia-native`: a Windows UI Automation pattern or ValuePattern performed the action.
+- `accessibility-native`: a Windows UI Automation pattern or ValuePattern performed the action.
 - `element-coordinate`: a semantic element was found but its bounds were used as the input fallback.
 - `vision-coordinate`: a coordinate action followed a current screenshot observation.
 - `coordinate-input`: a coordinate input was used without a screenshot-derived target.

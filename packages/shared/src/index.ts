@@ -18,7 +18,7 @@ export type AgentStatus = "idle" | "running" | "completed" | "stopped" | "error"
 export type ActionRisk = "read" | "interaction" | "sensitive" | "destructive";
 
 export type InteractionMethod =
-  | "uia-native"
+  | "accessibility-native"
   | "element-coordinate"
   | "vision-coordinate"
   | "coordinate-input"
@@ -56,12 +56,14 @@ export interface QualificationElementSnapshot {
   id: string;
   parentId?: string;
   role: string;
+  subrole?: string;
   name: string;
   automationId?: string;
   className: string;
   bounds: QualificationBounds;
   enabled: boolean;
   offscreen: boolean;
+  focused?: boolean;
   supportedPatterns: string[];
   value?: string;
 }
@@ -74,6 +76,7 @@ export interface QualificationScreenshotSnapshot {
   captureWidth: number;
   captureHeight: number;
   dpi: number;
+  scaleFactor?: number;
   coordinateSystem: string;
 }
 
@@ -102,6 +105,7 @@ export interface MonitorDiagnostics {
   bounds: QualificationBounds;
   workArea: QualificationBounds;
   dpi: number;
+  scaleFactor?: number;
   primary: boolean;
 }
 
@@ -109,6 +113,7 @@ export interface SelfTestScreenshotDiagnostics {
   width: number;
   height: number;
   dpi: number;
+  scaleFactor?: number;
   coordinateSystem: string;
   captureBounds: QualificationBounds;
 }
@@ -123,6 +128,9 @@ export interface EngineSelfTestResult {
   inputApisAvailable: boolean;
   monitorCount: number;
   monitors: MonitorDiagnostics[];
+  platform?: string;
+  accessibilityPermission?: "granted" | "denied" | "unknown";
+  screenRecordingPermission?: "granted" | "denied" | "unknown";
   screenshot?: SelfTestScreenshotDiagnostics;
   detail?: string;
 }
@@ -303,6 +311,8 @@ export type OpenUseErrorCode =
   | "INVALID_TOOL_INPUT"
   | "CREDENTIAL_INTERACTION_DISABLED"
   | "UNSUPPORTED_ACTION"
+  | "ACCESSIBILITY_PERMISSION_REQUIRED"
+  | "SCREEN_RECORDING_PERMISSION_REQUIRED"
   | "IPC_ERROR";
 
 export class OpenUseError extends Error {

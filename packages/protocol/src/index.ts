@@ -32,12 +32,14 @@ export interface UiElement {
   id: string;
   parentId?: string;
   role: string;
+  subrole?: string;
   name: string;
   automationId?: string;
   className: string;
   bounds: Bounds;
   enabled: boolean;
   offscreen: boolean;
+  focused?: boolean;
   supportedPatterns: string[];
   value?: string;
 }
@@ -54,8 +56,9 @@ export interface Screenshot {
   width: number;
   height: number;
   source: "screen" | "window";
-  coordinateSystem: "virtual-screen-physical-pixels";
+  coordinateSystem: "virtual-screen-physical-pixels" | "global-screen-points";
   dpi: number;
+  scaleFactor?: number;
   captureBounds: Bounds;
 }
 

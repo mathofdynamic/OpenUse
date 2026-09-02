@@ -2,7 +2,7 @@
   "name": "openuse",
   "version": "0.1.0",
   "private": true,
-  "description": "A local-first, AI-agnostic Computer Use runtime for Windows.",
+  "description": "A local-first, AI-agnostic Computer Use runtime for macOS and Windows.",
   "packageManager": "pnpm@10.14.0",
   "engines": {
     "node": ">=20"
@@ -17,11 +17,17 @@
     "test": "pnpm -r test",
     "native:build": "dotnet publish native/windows/OpenUse.WindowsController.csproj -c Release -r win-x64 --self-contained false -o native/windows/publish",
     "native:test": "dotnet test native/windows.tests/OpenUse.WindowsController.Tests.csproj",
+    "native:build:macos": "swift build --package-path native/macos -c release",
+    "native:test:macos": "swift run --package-path native/macos -c debug OpenUseMacProtocolTests",
     "test:windows": "pnpm native:build && pnpm native:test && pnpm --filter @openuse/desktop test:windows",
+    "test:macos": "pnpm native:build:macos && pnpm native:test:macos && pnpm --filter @openuse/desktop test:macos",
     "test:qualification": "node scripts/check-qualification.mjs",
     "setup:windows": "node scripts/setup-windows.mjs",
     "verify:windows": "node scripts/verify-windows.mjs",
     "qualify:windows": "node scripts/qualify-windows.mjs",
+    "setup:macos": "node scripts/setup-macos.mjs",
+    "verify:macos": "node scripts/verify-macos.mjs",
+    "qualify:macos": "node scripts/qualify-macos.mjs",
     "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {

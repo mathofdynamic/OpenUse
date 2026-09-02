@@ -88,7 +88,7 @@ describe("ComputerUseAgent", () => {
     ]);
     expect(events.some((event) => (event as { type?: string }).type === "action.completed")).toBe(true);
     const completed = events.find((event) => (event as { type?: string }).type === "action.completed" && (event as { actionId?: string }).actionId?.endsWith("-action-4")) as { telemetry?: { interactionMethod?: string; retryCount?: number } } | undefined;
-    expect(completed?.telemetry).toMatchObject({ interactionMethod: "uia-native", retryCount: 0 });
+    expect(completed?.telemetry).toMatchObject({ interactionMethod: "accessibility-native", retryCount: 0 });
   });
 
   it("stops before a provider step when cancelled", async () => {
@@ -106,6 +106,21 @@ describe("ComputerUseAgent", () => {
       onEvent: () => undefined,
     })).rejects.toMatchObject({ code: "TASK_CANCELLED" });
     expect(provider.calls).toHaveLength(0);
+  });
+
+  it("fails closed when the model stops without a tool or computer_finish", async () => {
+    const provider = new ScriptedProvider([]);
+    const computer = new MockComputerController();
+    const permissions = new PermissionEngine(new InMemoryPermissionStore(), { request: async () => "allow-once" });
+
+    await expect(new ComputerUseAgent(provider, computer, permissions).run({
+      taskId: "no-tool-task",
+      command: "Open TextEdit and type a message.",
+      modelId: "openai/gpt-5.4",
+      abortSignal: new AbortController().signal,
+      onEvent: () => undefined,
+    })).rejects.toMatchObject({ code: "MODEL_FAILED" });
+    expect(computer.state.actions).toHaveLength(0);
   });
 
   it("records a coordinate action after a screenshot as a vision fallback", async () => {

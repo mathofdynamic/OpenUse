@@ -12,6 +12,7 @@ native/windows/obj/
 native/windows/publish/
 native/windows.tests/bin/
 native/windows.tests/obj/
+native/macos/.build/
 .DS_Store
 ._*
 __MACOSX/
