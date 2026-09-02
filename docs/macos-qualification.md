@@ -6,6 +6,14 @@
 
 This record is intentionally conservative. The current development host is macOS 26.0.1 arm64. The Swift controller builds and the protocol smoke test passes, but the native self-test last reported Accessibility and Screen Recording as denied. Therefore the three real AI scenarios have not been counted and OpenUse is not called macOS-qualified.
 
+## Packaging pass status
+
+- `electron-builder` 26.15.3 arm64 bundle and DMG configuration: source-reviewed and temporary-output smoke-tested.
+- Temporary unpacked production bundle: Electron started, emitted the real native self-test and engine-status events, and found the embedded controller at `Contents/Resources/native/macos/OpenUseMacController`.
+- Temporary DMG: electron-builder produced an arm64 DMG with its standard Applications shortcut.
+- Official `pnpm dist:macos`: **BLOCKED** because the required exact source `app-logo/logo.png` is absent from this checkout. No substitute icon was used and no official OpenUse.app or DMG was created.
+- Installed `/Applications/OpenUse.app`: NOT TESTED because the official artifact could not be produced.
+
 ## Preflight evidence at implementation time
 
 ```text

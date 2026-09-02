@@ -1,0 +1,31 @@
+appId: com.openuse.app
+productName: OpenUse
+asar: true
+directories:
+  output: ../../dist/macos
+  buildResources: .build/macos
+files:
+  - dist/**/*
+  - package.json
+extraResources:
+  - from: ../../native/macos/.build/release/OpenUseMacController
+    to: native/macos/OpenUseMacController
+mac:
+  target:
+    - target: dir
+      arch:
+        - arm64
+    - target: dmg
+      arch:
+        - arm64
+  category: public.app-category.productivity
+  icon: OpenUse.icns
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  minimumSystemVersion: 13.0.0
+  extendInfo:
+    NSHighResolutionCapable: true
+dmg:
+  title: OpenUse
+  icon: OpenUse.icns

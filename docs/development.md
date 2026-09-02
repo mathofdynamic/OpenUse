@@ -92,7 +92,9 @@ The Swift sidecar is built with the system Swift toolchain and uses `AXUIElement
 
 The macOS coordinate model is global desktop points for accessibility bounds and CGEvent input. Captures are physical-pixel images with a `scaleFactor`; the agent receives the explicit mapping between image pixels and point-space capture bounds. The self-test records monitor count, bounds, and scale without moving the pointer or changing display settings.
 
-`pnpm qualify:macos` runs the three TextEdit/Calculator goals three times each and writes redacted evidence under `.openuse/qualification/`. It also guides Stop, permission, Retina, vision-fallback, and multi-monitor checks. It never injects an action sequence or infers a visible success.
+For the installable qualification target, run `pnpm dist:macos`, install the DMG into `/Applications`, and launch the installed app. `pnpm verify:macos` also checks the exact icon source and packaging configuration. `pnpm qualify:macos` then launches `/Applications/OpenUse.app` directly, records that target, and runs the three TextEdit/Calculator goals three times each. It also guides Stop, permission, Retina, vision-fallback, and multi-monitor checks. It never injects an action sequence or infers a visible success. Use `pnpm qualify:macos --development` only for explicit loose-development debugging.
+
+See [docs/MACOS_PACKAGING.md](MACOS_PACKAGING.md) for the bundle layout, exact icon source, local signing state, and DMG workflow.
 
 ## Current verification environment
 

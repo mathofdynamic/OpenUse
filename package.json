@@ -28,6 +28,8 @@
     "setup:macos": "node scripts/setup-macos.mjs",
     "verify:macos": "node scripts/verify-macos.mjs",
     "qualify:macos": "node scripts/qualify-macos.mjs",
+    "package:macos": "node scripts/dist-macos.mjs",
+    "dist:macos": "node scripts/dist-macos.mjs",
     "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {

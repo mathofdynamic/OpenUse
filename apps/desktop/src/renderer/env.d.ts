@@ -10,6 +10,7 @@ declare global {
       testGatewayConnection(modelId: string): Promise<GatewayConnectionResult>;
       runSelfTest(): Promise<void>;
       openMacPrivacy(area: "accessibility" | "screen-recording"): Promise<void>;
+      relaunch(): Promise<void>;
       startTask(command: string): Promise<void>;
       stopTask(): Promise<void>;
       decidePermission(id: string, decision: PermissionDecision): Promise<void>;

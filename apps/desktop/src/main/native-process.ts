@@ -6,11 +6,25 @@ import { nativeResponseSchema, type NativeMethod, type NativeMethodParams, type 
 import { OpenUseError, nowIso, type EngineStatus } from "@openuse/shared";
 import type { ComputerRpc } from "@openuse/computer";
 
-interface NativeProcessOptions {
+export interface NativeProcessOptions {
   platform: NodeJS.Platform;
   isPackaged: boolean;
   appPath: string;
   resourcesPath: string;
+}
+
+export function resolveNativeEnginePath(options: NativeProcessOptions, configuredPath?: string): string | undefined {
+  const developmentOverride = configuredPath ?? (!options.isPackaged ? process.env.OPENUSE_NATIVE_ENGINE_PATH : undefined);
+  if (developmentOverride) return developmentOverride;
+  if (options.platform === "darwin") {
+    if (!options.isPackaged) return join(options.appPath, "..", "..", "native", "macos", ".build", "release", "OpenUseMacController");
+    return join(options.resourcesPath, "native", "macos", "OpenUseMacController");
+  }
+  if (options.platform === "win32") {
+    if (!options.isPackaged) return join(options.appPath, "..", "..", "native", "windows", "publish", "OpenUse.WindowsController.exe");
+    return join(options.resourcesPath, "native", "windows", "OpenUse.WindowsController.exe");
+  }
+  return undefined;
 }
 
 interface PendingRequest {
@@ -300,14 +314,7 @@ export class NativeEngineProcess implements ComputerRpc {
   }
 
   private resolveEnginePath(): string | undefined {
-    const configured = process.env.OPENUSE_NATIVE_ENGINE_PATH;
-    if (configured) return configured;
-    if (this.options.platform === "darwin") {
-      if (!this.options.isPackaged) return join(this.options.appPath, "..", "..", "native", "macos", ".build", "release", "OpenUseMacController");
-      return join(this.options.resourcesPath, "native", "macos", "OpenUseMacController");
-    }
-    if (!this.options.isPackaged) return join(this.options.appPath, "..", "..", "native", "windows", "publish", "OpenUse.WindowsController.exe");
-    return join(this.options.resourcesPath, "native", "windows", "OpenUse.WindowsController.exe");
+    return resolveNativeEnginePath(this.options);
   }
 
   private supportedHost(): boolean {

@@ -79,6 +79,15 @@ function installIpc(): void {
       : "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
     await shell.openExternal(url);
   });
+  ipcMain.handle("openuse:relaunch", async (event) => {
+    assertSender(event);
+    if (process.platform !== "darwin") throw new OpenUseError("UNSUPPORTED_ACTION", "Relaunch is only available on macOS.");
+    await runtime?.stop();
+    await engine?.shutdown();
+    isQuitting = true;
+    app.relaunch();
+    app.exit(0);
+  });
   ipcMain.handle("openuse:start-task", async (event, raw: unknown) => {
     assertSender(event);
     const { command } = taskSchema.parse(raw);

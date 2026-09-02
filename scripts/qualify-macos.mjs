@@ -9,12 +9,24 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const scenarioDirectory = join(repositoryRoot, "qualification", "scenarios");
 const outputRoot = join(repositoryRoot, ".openuse", "qualification");
 const skipPreflight = process.argv.includes("--skip-preflight");
+const developmentMode = process.argv.includes("--development");
+const requestedAppPath = argumentValue("--app") ?? process.env.OPENUSE_QUALIFICATION_APP_PATH ?? "/Applications/OpenUse.app";
 const taskTimeoutMs = 180_000;
 const scenarios = ["macos-textedit-typing.json", "macos-calculator.json", "macos-textedit-save-as.json"].map((file) => readScenario(file));
 
 if (process.platform !== "darwin") {
   console.error("qualify:macos must run on macOS. No GUI qualification was attempted.");
   process.exit(1);
+}
+
+let qualificationTarget;
+if (!developmentMode) {
+  try {
+    qualificationTarget = resolveInstalledTarget(requestedAppPath);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "The installed OpenUse target could not be resolved.");
+    process.exit(1);
+  }
 }
 
 const runId = `run-${new Date().toISOString().replace(/[:.]/g, "-")}`;
@@ -28,6 +40,11 @@ const resultDocument = {
   version: 1,
   platform: "darwin",
   runId,
+  target: {
+    mode: developmentMode ? "development" : "installed",
+    appPath: qualificationTarget?.appPath ?? null,
+    executable: qualificationTarget?.executable ?? null,
+  },
   startedAt: new Date().toISOString(),
   finishedAt: undefined,
   preflight: skipPreflight ? "SKIPPED_BY_OPERATOR" : "PENDING",
@@ -56,9 +73,18 @@ try {
   console.log(`Evidence directory: ${runDirectory}`);
   console.log("Configure a compatible Gateway model and key in OpenUse Settings before continuing.");
   console.log("The harness displays goals only; it never injects a click sequence or declares a task successful on its own.\n");
-  child = spawn(process.execPath, [resolve(repositoryRoot, "apps/desktop", "scripts", "dev-qualify.mjs")], {
-    cwd: resolve(repositoryRoot, "apps/desktop"),
-    env: { ...process.env, OPENUSE_QUALIFICATION_MODE: "1", OPENUSE_QUALIFICATION_DIR: runDirectory, OPENUSE_QUALIFICATION_RUN_ID: runId },
+  const targetCommand = developmentMode ? process.execPath : qualificationTarget.executable;
+  const targetArguments = developmentMode ? [resolve(repositoryRoot, "apps/desktop", "scripts", "dev-qualify.mjs")] : [];
+  child = spawn(targetCommand, targetArguments, {
+    cwd: developmentMode ? resolve(repositoryRoot, "apps/desktop") : repositoryRoot,
+    env: {
+      ...process.env,
+      OPENUSE_QUALIFICATION_MODE: "1",
+      OPENUSE_QUALIFICATION_DIR: runDirectory,
+      OPENUSE_QUALIFICATION_RUN_ID: runId,
+      OPENUSE_QUALIFICATION_TARGET: resultDocument.target.mode,
+      OPENUSE_QUALIFICATION_TARGET_APP_PATH: resultDocument.target.appPath ?? "",
+    },
     stdio: ["ignore", "inherit", "inherit"],
   });
   child.once("error", (error) => { childError = error; });
@@ -204,7 +230,7 @@ function writeEvidence(document) {
 }
 
 function renderReport(document) {
-  const lines = ["# OpenUse macOS qualification", "", `Status: **${document.overallStatus}**`, `Run: ${document.runId}`, `Preflight: ${document.preflight}`, `Started: ${document.startedAt}`, `Finished: ${document.finishedAt ?? "IN PROGRESS"}`, "", "## Environment", "", "```json", JSON.stringify(document.environment, null, 2), "```", "", "## Scenarios", ""];
+  const lines = ["# OpenUse macOS qualification", "", `Status: **${document.overallStatus}**`, `Run: ${document.runId}`, `Target: **${document.target.mode}**${document.target.appPath ? ` · ${document.target.appPath}` : ""}`, `Preflight: ${document.preflight}`, `Started: ${document.startedAt}`, `Finished: ${document.finishedAt ?? "IN PROGRESS"}`, "", "## Environment", "", "```json", JSON.stringify(document.environment, null, 2), "```", "", "## Scenarios", ""];
   for (const scenario of document.scenarios) {
     lines.push(`### ${scenario.title}`, "", `Success rate: ${scenario.successes}/${scenario.repeatTarget} (${Math.round(scenario.successRate * 100)}%)`, "");
     for (const attempt of scenario.attempts) lines.push(`- Run ${attempt.attempt}: **${attempt.success ? "PASS" : "FAIL"}** · model ${attempt.model} · actions ${attempt.actionCount ?? "?"} · accessibility-native ${attempt.accessibilityNativeActions} · element-coordinate ${attempt.elementCoordinateFallbacks} · vision-coordinate ${attempt.visionCoordinateFallbacks} · coordinate-input ${attempt.coordinateInputActions} · keyboard-input ${attempt.keyboardInputActions} · retries ${attempt.retries} · stale recoveries ${attempt.staleElementRecoveries} · permission prompts ${attempt.permissionPrompts} · scale ${attempt.screenshot?.scaleFactor ?? "?"}× · capture ${attempt.screenshot ? `${attempt.screenshot.width}×${attempt.screenshot.height} at (${attempt.screenshot.originX}, ${attempt.screenshot.originY})` : "?"} · duration ${attempt.durationMs ?? "?"}ms${attempt.failureReason ? ` · ${attempt.failureReason}` : ""}`);
@@ -251,6 +277,25 @@ function readScenario(file) {
   const scenario = JSON.parse(readFileSync(join(scenarioDirectory, file), "utf8"));
   if (scenario.platform !== "darwin" || !scenario.id || !scenario.task || scenario.repeatCount !== 3 || scenario.maxActions !== 30) throw new Error(`Invalid macOS qualification scenario: ${file}`);
   return scenario;
+}
+
+function argumentValue(name) {
+  const inline = process.argv.find((argument) => argument.startsWith(`${name}=`));
+  if (inline) return inline.slice(name.length + 1);
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] : undefined;
+}
+
+function resolveInstalledTarget(appPath) {
+  const normalizedAppPath = resolve(appPath);
+  if (!existsSync(normalizedAppPath)) {
+    throw new Error(`Installed OpenUse.app was not found at ${normalizedAppPath}. Run pnpm dist:macos, install it into /Applications, then run pnpm qualify:macos.`);
+  }
+  const executable = normalizedAppPath.endsWith(".app") ? join(normalizedAppPath, "Contents", "MacOS", "OpenUse") : normalizedAppPath;
+  if (!existsSync(executable)) {
+    throw new Error(`The installed OpenUse executable was not found at ${executable}. Rebuild and reinstall the packaged app.`);
+  }
+  return { appPath: normalizedAppPath.endsWith(".app") ? normalizedAppPath : null, executable };
 }
 
 function readEnvironment() {

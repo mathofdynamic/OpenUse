@@ -5,11 +5,14 @@
   "type": "module",
   "main": "dist/main.cjs",
   "productName": "OpenUse",
+  "description": "A local-first, AI-agnostic Computer Use runtime.",
+  "author": "OpenUse contributors",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:qualify": "node scripts/dev-qualify.mjs",
     "build": "node scripts/build.mjs",
     "build:main": "node scripts/build-main.mjs",
+    "package:macos": "node ../../scripts/dist-macos.mjs",
     "test:windows": "node scripts/test-windows.mjs",
     "test:macos": "node scripts/test-macos.mjs",
     "typecheck": "tsc --noEmit",
@@ -22,7 +25,6 @@
     "@openuse/permissions": "workspace:*",
     "@openuse/protocol": "workspace:*",
     "@openuse/shared": "workspace:*",
-    "electron": "43.4.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "zod": "^3.25.76"
@@ -31,6 +33,8 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.3.4",
+    "electron": "43.4.1",
+    "electron-builder": "26.15.3",
     "esbuild": "^0.25.5",
     "vite": "^7.0.6",
     "vitest": "^3.2.4"

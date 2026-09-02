@@ -1,6 +1,6 @@
 # OpenUse macOS testing
 
-This is the real macOS Computer Use path. It requires an interactive macOS desktop and a user-approved Vercel AI Gateway key. The native controller is a Swift sidecar; no mock controller is used by these checks or by GUI qualification.
+This is the real macOS Computer Use path. It requires an interactive macOS desktop and a user-approved Vercel AI Gateway key. The native controller is a Swift sidecar; no mock controller is used by these checks or by GUI qualification. For qualification, use the installed `/Applications/OpenUse.app` produced by [MACOS_PACKAGING.md](MACOS_PACKAGING.md), not a loose development controller.
 
 ## Requirements
 
@@ -46,13 +46,19 @@ xcode-select --install
 
 ## Required macOS privacy permissions
 
-OpenUse cannot bypass macOS privacy controls. Before GUI qualification, grant both permissions to the process that runs the native controller:
+OpenUse cannot bypass macOS privacy controls. Build and install the packaged app before granting permissions for a qualification run:
+
+```bash
+pnpm dist:macos
+```
+
+Mount the resulting arm64 DMG, drag OpenUse to Applications, eject it, and launch `/Applications/OpenUse.app`. Then grant both permissions to the installed OpenUse identity shown by macOS:
 
 1. Open **System Settings → Privacy & Security → Accessibility**.
-2. Add/enable the OpenUse development controller at `native/macos/.build/release/OpenUseMacController`. For a packaged build, add the OpenUse application as well.
+2. Add/enable **OpenUse** or the clearly identified OpenUse controller shown by macOS. Do not grant a stale path under the repository when qualifying the installed build.
 3. Open **System Settings → Privacy & Security → Screen & System Audio Recording** (called **Screen Recording** on some versions).
-4. Add/enable the same OpenUse/controller process.
-5. Quit and relaunch OpenUse if macOS asks for a restart.
+4. Add/enable the same installed OpenUse/controller identity.
+5. Return to OpenUse, press **Recheck**, and use **Relaunch OpenUse** if macOS requires a restart.
 
 The running app shows separate Accessibility and Screen Recording status, fixed buttons to open each System Settings pane, and **Recheck**. A denied grant is a real preflight failure; it is never converted into a connected/qualified result.
 
@@ -87,10 +93,10 @@ The latter reports the actual permission state as `granted` or `denied`; it does
 
 ## Gateway setup and launch
 
-After the preflight passes:
+After the package is installed and the required grants are approved, launch the installed app from Finder or:
 
 ```bash
-pnpm dev
+open /Applications/OpenUse.app
 ```
 
 In OpenUse Settings:
@@ -105,11 +111,13 @@ The key is encrypted by Electron `safeStorage` in the main process. It is never 
 
 ## Real qualification
 
-From the repository root:
+From the repository root, with `/Applications/OpenUse.app` installed and the development app closed:
 
 ```bash
 pnpm qualify:macos
 ```
+
+The harness launches the installed executable at `/Applications/OpenUse.app/Contents/MacOS/OpenUse`, passes qualification-mode environment variables to that process, and records the target path in `results.json` and `report.md`. It refuses to silently fall back to `pnpm dev`. For an explicit installed bundle elsewhere, use `OPENUSE_QUALIFICATION_APP_PATH=/path/to/OpenUse.app pnpm qualify:macos`. Use `pnpm qualify:macos --development` only when deliberately debugging the loose development app.
 
 The harness runs the following exact goals three times each:
 
@@ -134,6 +142,8 @@ Each run writes only to the gitignored directory:
 ```
 
 The report contains the exact model ID, attempt result, action count, accessibility-native actions, element-coordinate fallbacks, vision-coordinate fallbacks, coordinate/keyboard input counts, retries, stale recoveries, permission prompts, duration, monitor count, and scale metadata. It does not contain screenshots, model messages, chain-of-thought, API keys, passwords, full typed values, or accessibility values.
+
+The report also records whether the target was the installed app or the explicit development harness. A run against the development target is not evidence for installed-app qualification.
 
 ## Coordinate model
 

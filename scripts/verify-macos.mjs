@@ -11,6 +11,7 @@ if (process.platform !== "darwin") {
 const checks = [];
 runCheck("Qualification definitions", process.execPath, ["scripts/check-qualification.mjs"]);
 runCheck("Environment", process.execPath, ["scripts/setup-macos.mjs", "--check-only"]);
+runCheck("macOS packaging inputs", process.execPath, ["scripts/check-macos-packaging.mjs"]);
 runCheck("TypeScript lint", "pnpm", ["lint"]);
 runCheck("TypeScript typecheck", "pnpm", ["typecheck"]);
 runCheck("TypeScript tests", "pnpm", ["test"]);

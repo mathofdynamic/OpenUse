@@ -61,6 +61,7 @@ const browserPreviewBridge: Window["openuse"] = {
   testGatewayConnection: async () => { throw new Error("Settings are available in the OpenUse desktop app."); },
   runSelfTest: async () => { throw new Error("Diagnostics are available in the OpenUse desktop app."); },
   openMacPrivacy: async () => { throw new Error("macOS privacy settings are available in the OpenUse desktop app."); },
+  relaunch: async () => { throw new Error("Relaunch is available in the OpenUse desktop app."); },
   startTask: async () => { throw new Error("Computer control is available in the OpenUse desktop app."); },
   stopTask: async () => undefined,
   decidePermission: async () => undefined,
@@ -123,7 +124,8 @@ export function App() {
   const engineCanStart = engine.state === "ready" || engine.canStart === true;
   const platformLabel = platformName(engine.platform);
   const starterCommands = engine.platform === "darwin" ? MACOS_STARTER_COMMANDS : WINDOWS_STARTER_COMMANDS;
-  const nativePermissionsReady = engine.platform !== "darwin" || selfTest?.ok !== false;
+  const nativePermissionsReady = engine.platform !== "darwin" || selfTest?.ok === true;
+  const controlReady = engine.state === "ready" && nativePermissionsReady;
   const canRun = Boolean(command.trim()) && !isRunning && settings.apiKeyConfigured && modelCompatible && engineCanStart && nativePermissionsReady;
 
   async function runTask() {
@@ -221,8 +223,8 @@ export function App() {
 
         <div className="rail-spacer" />
         <div className="rail-note">
-          <div className="rail-note-heading"><span className={`status-dot status-${engine.state}`} />Local runtime</div>
-          <p>{engine.state === "ready" ? `${platformLabel} control is connected.` : engine.detail}</p>
+          <div className="rail-note-heading"><span className={`status-dot ${controlReady ? "status-ready" : `status-${engine.state}`}`} />Local runtime</div>
+          <p>{controlReady ? `${platformLabel} control is connected.` : engine.platform === "darwin" && selfTest && !selfTest.ok ? "macOS permissions are required." : engine.detail}</p>
           <div className="rail-version">OpenUse MVP · {platformLabel}</div>
         </div>
       </aside>
@@ -231,8 +233,8 @@ export function App() {
         <header className="topbar">
           <div className="mobile-brand"><div className="brand-mark small" aria-hidden="true"><span /></div><span>OpenUse</span></div>
           <div className="topbar-context">
-            <span className={`status-dot status-${engine.state}`} />
-            <span>{engine.state === "ready" ? `${platformLabel} control ready` : engine.state === "unsupported" ? `${platformLabel} control unavailable` : `${platformLabel} control offline`}</span>
+            <span className={`status-dot ${controlReady ? "status-ready" : `status-${engine.state}`}`} />
+            <span>{controlReady ? `${platformLabel} control ready` : engine.platform === "darwin" && selfTest && !selfTest.ok ? `${platformLabel} permission required` : engine.state === "unsupported" ? `${platformLabel} control unavailable` : `${platformLabel} control offline`}</span>
           </div>
           <div className="topbar-actions">
             <label className="model-picker compact-picker">
@@ -270,7 +272,7 @@ export function App() {
           </section>
 
           {error && <div className="inline-alert" role="alert"><Glyph name="alert" /><span>{error}</span><button type="button" onClick={() => setError(undefined)} aria-label="Dismiss error">×</button></div>}
-          {engine.platform === "darwin" && selfTest && !selfTest.ok && <div className="inline-alert" role="alert"><Glyph name="alert" /><span>{selfTest.detail ?? "macOS privacy permissions are required for Computer Use."}</span>{selfTest.accessibilityPermission === "denied" && <button type="button" onClick={() => void runtimeApi.openMacPrivacy("accessibility")}>Accessibility settings</button>}{selfTest.screenRecordingPermission === "denied" && <button type="button" onClick={() => void runtimeApi.openMacPrivacy("screen-recording")}>Screen Recording settings</button>}<button type="button" onClick={() => void runtimeApi.runSelfTest()}>Recheck</button></div>}
+          {engine.platform === "darwin" && selfTest && !selfTest.ok && <MacPermissionSetup selfTest={selfTest} />}
 
           <div className="workspace-grid">
             <section className="activity-surface" aria-labelledby="activity-heading">
@@ -322,8 +324,8 @@ export function App() {
             <aside className="inspector-column" aria-label="Runtime details">
               <section className="inspector-section engine-section">
                 <div className="section-heading"><span className="section-icon"><Glyph name="desktop" /></span><span>Control surface</span></div>
-                <div className="engine-title"><span className={`large-status-dot status-${engine.state}`} />{engine.state === "ready" ? `${platformLabel} desktop` : `${platformLabel} control`}</div>
-                <p className="engine-copy">{engine.state === "ready" ? "Actions stay local. OpenUse uses native accessibility first, with screenshots only when the model asks." : engine.detail}</p>
+                <div className="engine-title"><span className={`large-status-dot ${controlReady ? "status-ready" : `status-${engine.state}`}`} />{controlReady ? `${platformLabel} desktop` : `${platformLabel} control`}</div>
+                <p className="engine-copy">{controlReady ? "Actions stay local. OpenUse uses native accessibility first, with screenshots only when the model asks." : engine.platform === "darwin" && selfTest && !selfTest.ok ? "Grant the required macOS permissions before computer control can start." : engine.detail}</p>
                 <div className="engine-rule" />
                 <div className="engine-foot"><span>Protocol</span><strong>JSON-lines / stdio</strong></div>
               </section>
@@ -427,6 +429,19 @@ function handleRuntimeEvent(
       setters.setSelfTest(event.result);
       break;
   }
+}
+
+function MacPermissionSetup({ selfTest }: { selfTest: EngineSelfTestResult }) {
+  const permissionState = (value: EngineSelfTestResult["accessibilityPermission"]): string => value === "granted" ? "Granted" : value === "denied" ? "Not granted" : "Unknown";
+  return <section className="privacy-setup" role="alert" aria-labelledby="privacy-setup-title">
+    <div className="privacy-setup-heading"><div><div className="eyebrow"><span className="eyebrow-line" />Computer control setup</div><h2 id="privacy-setup-title">OpenUse needs two macOS permissions.</h2></div><Glyph name="shield" /></div>
+    <p>These permissions stay under macOS control. OpenUse will not start a Computer Use task until both are granted.</p>
+    <div className="privacy-setup-list">
+      <div className="privacy-setup-row"><div><strong>Accessibility</strong><span>Control buttons, fields, and windows semantically.</span></div><div className={`privacy-state ${selfTest.accessibilityPermission === "granted" ? "privacy-state-granted" : ""}`}>{permissionState(selfTest.accessibilityPermission)}</div><button className="secondary-action" type="button" onClick={() => void runtimeApi.openMacPrivacy("accessibility")}>Open Settings</button></div>
+      <div className="privacy-setup-row"><div><strong>Screen Recording</strong><span>Inspect the desktop when visual feedback is needed.</span></div><div className={`privacy-state ${selfTest.screenRecordingPermission === "granted" ? "privacy-state-granted" : ""}`}>{permissionState(selfTest.screenRecordingPermission)}</div><button className="secondary-action" type="button" onClick={() => void runtimeApi.openMacPrivacy("screen-recording")}>Open Settings</button></div>
+    </div>
+    <div className="privacy-setup-actions"><span>{selfTest.detail ?? "Grant both permissions in System Settings, then recheck."}</span><button className="secondary-action" type="button" onClick={() => void runtimeApi.runSelfTest()}>Recheck</button><button className="primary-action" type="button" onClick={() => void runtimeApi.relaunch()}>Relaunch OpenUse</button></div>
+  </section>;
 }
 
 function EmptyActivity({ commands, onStarter }: { commands: string[]; onStarter(value: string): void }) {

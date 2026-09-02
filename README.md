@@ -25,9 +25,9 @@ Use `pnpm qualify:windows` for the guided, three-run-per-scenario qualification 
 
 Development automatically resolves `native/windows/publish/OpenUse.WindowsController.exe`. Set `OPENUSE_NATIVE_ENGINE_PATH` only when the sidecar lives elsewhere.
 
-Open Settings, choose a model with both tool calling and vision, and enter your own `AI_GATEWAY_API_KEY`. The key is encrypted with the Windows-backed Electron `safeStorage` provider.
+Open Settings, choose a model with both tool calling and vision, and enter your own `AI_GATEWAY_API_KEY`. The key is encrypted with the OS-backed Electron `safeStorage` provider.
 
-On macOS, `pnpm setup:macos` builds the Swift controller and the Electron app reports the detected macOS privacy grants. Windows remains available through its .NET controller and Windows-specific commands.
+On macOS, `pnpm setup:macos` prepares the Swift controller. For an installable arm64 app and DMG, run `pnpm dist:macos` and follow [docs/MACOS_PACKAGING.md](docs/MACOS_PACKAGING.md). Real qualification uses the installed app and the workflow in [docs/MACOS_TESTING.md](docs/MACOS_TESTING.md). Windows remains available through its .NET controller and Windows-specific commands.
 
 ## In-scope scenarios
 

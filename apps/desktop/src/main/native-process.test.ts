@@ -2,7 +2,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { NativeEngineProcess } from "./native-process";
+import { NativeEngineProcess, resolveNativeEnginePath, type NativeProcessOptions } from "./native-process";
 
 const temporaryDirectories: string[] = [];
 const engines: NativeEngineProcess[] = [];
@@ -35,6 +35,45 @@ function createEngine(platform: "win32" | "darwin" = "win32"): NativeEngineProce
   engines.push(engine);
   return engine;
 }
+
+function pathOptions(platform: "win32" | "darwin", isPackaged: boolean): NativeProcessOptions {
+  return {
+    platform,
+    isPackaged,
+    appPath: isPackaged ? "/Applications/OpenUse.app/Contents/Resources/app.asar" : "/workspace/apps/desktop",
+    resourcesPath: isPackaged ? "/Applications/OpenUse.app/Contents/Resources" : "/workspace/resources",
+  };
+}
+
+describe("native controller path resolution", () => {
+  it("resolves the embedded macOS controller from packaged resources", () => {
+    expect(resolveNativeEnginePath(pathOptions("darwin", true))).toBe("/Applications/OpenUse.app/Contents/Resources/native/macos/OpenUseMacController");
+  });
+
+  it("resolves the repository macOS controller during development", () => {
+    expect(resolveNativeEnginePath(pathOptions("darwin", false))).toBe("/workspace/native/macos/.build/release/OpenUseMacController");
+  });
+
+  it("preserves Windows development and packaged paths", () => {
+    expect(resolveNativeEnginePath(pathOptions("win32", false))).toBe("/workspace/native/windows/publish/OpenUse.WindowsController.exe");
+    expect(resolveNativeEnginePath(pathOptions("win32", true))).toBe("/Applications/OpenUse.app/Contents/Resources/native/windows/OpenUse.WindowsController.exe");
+  });
+
+  it("honors an explicit sidecar path for diagnostics", () => {
+    expect(resolveNativeEnginePath(pathOptions("darwin", false), "/tmp/test-controller")).toBe("/tmp/test-controller");
+  });
+
+  it("keeps the packaged controller path authoritative", () => {
+    const saved = process.env.OPENUSE_NATIVE_ENGINE_PATH;
+    process.env.OPENUSE_NATIVE_ENGINE_PATH = "/tmp/external-controller";
+    try {
+      expect(resolveNativeEnginePath(pathOptions("darwin", true))).toBe("/Applications/OpenUse.app/Contents/Resources/native/macos/OpenUseMacController");
+    } finally {
+      if (saved === undefined) delete process.env.OPENUSE_NATIVE_ENGINE_PATH;
+      else process.env.OPENUSE_NATIVE_ENGINE_PATH = saved;
+    }
+  });
+});
 
 describe("native sidecar process boundary", () => {
   it("starts the configured macOS controller through the same protocol boundary", async () => {

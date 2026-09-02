@@ -9,6 +9,7 @@ const api = {
   testGatewayConnection: (modelId: string): Promise<GatewayConnectionResult> => ipcRenderer.invoke("openuse:test-gateway", { modelId }),
   runSelfTest: (): Promise<void> => ipcRenderer.invoke("openuse:self-test"),
   openMacPrivacy: (area: "accessibility" | "screen-recording"): Promise<void> => ipcRenderer.invoke("openuse:open-mac-privacy", { area }),
+  relaunch: (): Promise<void> => ipcRenderer.invoke("openuse:relaunch"),
   startTask: (command: string): Promise<void> => ipcRenderer.invoke("openuse:start-task", { command }),
   stopTask: (): Promise<void> => ipcRenderer.invoke("openuse:stop-task"),
   decidePermission: (id: string, decision: PermissionDecision): Promise<void> =>
