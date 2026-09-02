@@ -16,14 +16,16 @@ pnpm build
 
 Install the .NET 8 SDK on Windows, then run:
 
-```bash
+```powershell
 pnpm native:build
 pnpm native:test
-set OPENUSE_NATIVE_ENGINE_PATH=%CD%\\native\\windows\\publish\\OpenUse.WindowsController.exe
+pnpm test:windows
+$env:OPENUSE_NATIVE_ENGINE_PATH = "$PWD\\native\\windows\\publish\\OpenUse.WindowsController.exe"
 pnpm dev
 ```
 
-The sidecar is Windows-only and requires an interactive desktop session. It is not a service and does not open a TCP port.
+The sidecar is Windows-only and requires an interactive desktop session. It is not a service and does not open a TCP port. Task cancellation uses an internal JSON-lines `cancel` message so the sidecar can remain alive and drain the interrupted native action before the next task; application shutdown performs a final hard sidecar shutdown.
+`pnpm test:windows` is a non-destructive JSON-lines smoke test: it checks malformed input, unknown methods, invalid window IDs, `listWindows`, structured `wait`, cancellation, reuse after cancellation, and graceful shutdown. It does not manipulate the desktop.
 
 ## Manual acceptance matrix
 
@@ -57,8 +59,10 @@ env -u ELECTRON_RUN_AS_NODE pnpm exec electron .
 
 The process opened successfully and was stopped with Ctrl-C. Browser-preview UI checks used the Vite server at `http://127.0.0.1:5173` for the initial, settings, filled-composer, and narrow responsive states. The preview does not expose the desktop bridge, so it correctly reports Windows control as unavailable and cannot perform fake actions.
 
-`pnpm native:build` and `pnpm native:test` could not run on the development host because it is macOS without the .NET 8 SDK. Run both on Windows before shipping the sidecar.
+The Windows-targeted native projects were cross-built on the development host with .NET 10.0.400, but native tests and UI Automation cannot execute on macOS. Run `pnpm native:test` and `pnpm test:windows` on Windows before shipping the sidecar.
 
 ## Current verification environment
 
-The development workspace used for the first implementation pass is macOS on an external volume. Node/pnpm, TypeScript, Vitest, Electron build, and Electron boot can be verified here. The .NET SDK and Windows desktop session are unavailable here, so the Windows sidecar compile and physical scenarios remain explicitly unverified until run on Windows; the source and native test project are included for that pass.
+The development workspace used for this pass is macOS on an external volume. Node/pnpm, TypeScript, Vitest, Electron build, Electron boot, and a Windows-targeted native cross-build can be verified here. A Windows desktop session is unavailable here, so native test execution, UI Automation, and physical scenarios remain explicitly unverified until run on Windows.
+
+The native controller declares `PerMonitorV2` DPI awareness. UI Automation bounds, pointer coordinates, and screen captures are expressed in virtual-screen physical pixels. Captures also report their `dpi`, source (`screen` or `window`), reduced image dimensions, and original physical `captureBounds` to the agent. Mixed-DPI multi-monitor behavior still requires a Windows acceptance run.

@@ -16,6 +16,7 @@
     "test": "pnpm -r test",
     "native:build": "dotnet publish native/windows/OpenUse.WindowsController.csproj -c Release -r win-x64 --self-contained false -o native/windows/publish",
     "native:test": "dotnet test native/windows.tests/OpenUse.WindowsController.Tests.csproj",
+    "test:windows": "pnpm native:build && pnpm native:test && pnpm --filter @openuse/desktop test:windows",
     "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {

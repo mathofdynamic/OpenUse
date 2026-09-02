@@ -9,6 +9,7 @@
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
     "build:main": "node scripts/build-main.mjs",
+    "test:windows": "node scripts/test-windows.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts"
   },
