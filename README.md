@@ -1,69 +1,37 @@
 # OpenUse
 
-OpenUse is a local-first, AI-agnostic Computer Use runtime for macOS and Windows. You give it a natural-language task, choose a model, and it operates the desktop through a small, permission-checked tool surface.
+OpenUse is a local-first, AI-agnostic Computer Use runtime for macOS and Windows. A user chooses a model, gives it a natural-language task, and OpenUse operates the desktop through a typed, permission-checked controller.
 
-OpenUse is designed to make computer control observable and bounded:
+OpenUse keeps the model boundary and the computer boundary separate:
 
-- the model never receives unrestricted shell or filesystem access;
 - native accessibility is preferred over coordinates;
-- every action passes through the OpenUse permission and safety layer;
-- screenshots are requested only when visual reasoning is needed;
-- the user can stop an active task at any time.
+- screenshots are requested only when visual reasoning needs them;
+- every action passes through `ALLOW`, `ASK`, `DENY`, and high-risk approval rules;
+- the user can stop an active task at any time;
+- the model never receives unrestricted shell, PowerShell, filesystem, credential, or remote-control access.
 
-## Current status
+## v0.2.0
 
-OpenUse is an MVP development release. The macOS controller is available for real local testing. Windows support is implemented behind the same platform-neutral controller contract; native Windows GUI qualification must be run on Windows 10/11 x64.
+The v0.2 product pass preserves the existing Electron/React/TypeScript, agent, permission, and native-controller architecture while adding:
 
-The first supported model provider is [Vercel AI Gateway](https://vercel.com/ai-gateway). OpenUse does not hardcode a model or provider-specific Computer Use logic.
+- one responsive Control Room UI for both platforms;
+- monochrome tokens with one user-selected primary color;
+- native-backed translucent window material with adjustable blur and background opacity;
+- dynamic Vercel AI Gateway model discovery with a six-hour local cache and bundled fallback;
+- searchable, provider-filtered Computer Use model selection;
+- provider-neutral reasoning controls;
+- actual Gateway request-cost capture, task spend, lifetime spend, and a privacy-safe local usage ledger;
+- an optional OpenUse Agent Cursor overlay that visualizes semantic actions without moving or hijacking the physical pointer;
+- one custom OpenAI-compatible endpoint path for advanced and local models;
+- an x64 Windows NSIS installer containing the real .NET controller.
 
-## What it can do
+The live Gateway catalog contained 373 entries on 2026-09-05. The parser classified 251 language models and 155 Computer Use-compatible models at that point; the catalog is intentionally refreshed at runtime rather than treated as permanent source code.
 
-The initial qualification tasks are:
+## Quick start
 
-1. Open TextEdit and type `Hello from OpenUse`.
-2. Open Calculator, enter `37 × 19`, and verify the visible result `703`.
-3. Open TextEdit, type `OpenUse test file`, and save it as `openuse-test.txt` on the Desktop.
+Requirements: Node.js 20 or newer, pnpm 10.14.0, and a Vercel AI Gateway key for Gateway-backed tasks.
 
-These are real closed-loop tasks: observe, reason, request a typed tool, check permissions, execute locally, observe again, and continue until completion.
-
-## macOS quick start
-
-Requirements:
-
-- macOS 13 or newer;
-- Apple Silicon arm64 for the packaged MVP build;
-- Node.js 20 or newer;
-- pnpm 10.14.0;
-- Swift 5.9 or newer and Xcode Command Line Tools;
-- a Vercel AI Gateway API key;
-- Accessibility and Screen Recording permission for the installed OpenUse app.
-
-From the repository root:
-
-```bash
-pnpm setup:macos
-pnpm dist:macos
-```
-
-Install `dist/macos/OpenUse-0.1.0-arm64.dmg` by dragging OpenUse into Applications, then launch `/Applications/OpenUse.app`. Grant the permissions requested by OpenUse under **System Settings → Privacy & Security**. Use the app's **Recheck** control after granting them.
-
-After the app is installed and permissions are granted, run the safe automated preflight:
-
-```bash
-pnpm verify:macos
-```
-
-Open **Settings**, keep **Vercel AI Gateway** selected, enter your own Gateway key, select a model marked with both **Tool calling** and **Vision**, and press **Test connection**. The key is stored through Electron `safeStorage` and is never returned to the renderer or written to ordinary settings.
-
-For the full setup, packaging, permission, and qualification workflow, see:
-
-- [macOS testing](docs/MACOS_TESTING.md)
-- [macOS packaging](docs/MACOS_PACKAGING.md)
-- [macOS qualification record](docs/macos-qualification.md)
-
-## Windows quick start
-
-On a Windows 10/11 x64 development machine:
+Windows:
 
 ```powershell
 pnpm setup:windows
@@ -71,90 +39,89 @@ pnpm verify:windows
 pnpm dev
 ```
 
-The Windows controller is a .NET 8 sidecar using Windows UI Automation and native input APIs. Follow [docs/WINDOWS_TESTING.md](docs/WINDOWS_TESTING.md) for native build, preflight, and three-run GUI qualification. Windows GUI checks are intentionally not run from macOS or Linux.
-
-## Architecture
-
-```text
-User command
-    ↓
-OpenUse agent loop
-    ↓
-AI provider abstraction
-    ↓
-Typed Computer Use tools
-    ↓
-Permission and safety layer
-    ↓
-ComputerController
-    ├── macOS Swift sidecar
-    └── Windows .NET sidecar
-    ↓
-Local applications
-```
-
-The Electron main process owns secrets, permissions, the agent runtime, and the native sidecar lifecycle. The renderer is a UI client and does not receive the Gateway key. Native controllers communicate with Electron over private JSON-lines stdin/stdout; no inbound network listener is required.
-
-Both platforms follow the same interaction priority:
-
-1. accessibility inspection;
-2. native semantic action or value setting;
-3. element-bound coordinate fallback;
-4. screenshot/vision coordinate fallback.
-
-Read [docs/architecture.md](docs/architecture.md) and [docs/computer-use.md](docs/computer-use.md) for the implementation details.
-
-## Safety boundaries
-
-OpenUse deliberately does not expose shell execution, PowerShell, arbitrary filesystem APIs, credential entry, software installation, remote control, or a network-accessible agent server.
-
-Application control uses `ALLOW`, `ASK`, and `DENY` permissions. Unknown applications require approval. Destructive, credential-related, permission-changing, purchasing, and external-submission actions have an additional runtime approval boundary. The model cannot override these decisions.
-
-OpenUse records concise activity events rather than chain-of-thought. Qualification telemetry contains action counts, timings, target metadata, interaction methods, retries, and permission events; it omits API keys, screenshots, passwords, and full typed sensitive values.
-
-See [docs/security.md](docs/security.md) for the complete security model.
-
-## Development commands
-
-```bash
-pnpm install --frozen-lockfile
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm test:qualification
-```
-
-Platform-specific commands:
+macOS:
 
 ```bash
 pnpm setup:macos
 pnpm verify:macos
-pnpm qualify:macos
-pnpm setup:windows
-pnpm verify:windows
-pnpm qualify:windows
+pnpm dev
 ```
 
-`qualify:*` commands are explicit real-desktop harnesses. They write redacted evidence below `.openuse/qualification/`, which is ignored by Git. Mocks remain available for deterministic agent and protocol tests.
+Configure the provider, key, compatible model, and permissions in **Settings**. The key is encrypted through Electron `safeStorage` in the main process and is never returned to the renderer.
+
+## Packaging
+
+Windows packaging produces an x64 NSIS installer containing the published .NET sidecar:
+
+```powershell
+pnpm dist:windows
+```
+
+The installer is written to `dist/windows/` and is intentionally ignored by Git. Installed production code resolves the sidecar from packaged resources; it does not depend on a repository path.
+
+The macOS arm64 path remains supported:
+
+```bash
+pnpm dist:macos
+```
+
+The macOS package uses the shared renderer and agent. Its Swift controller remains a bundled native sidecar. Local packaging uses the existing ad-hoc signing path; Developer ID signing and notarization are separate release work.
+
+## Product architecture
+
+```text
+OpenUse Electron / React
+        |
+        +-- main-process runtime, secure storage, usage ledger, cursor overlay
+        |
+        +-- ComputerUseAgent
+        |       +-- Vercel AI Gateway catalog/provider
+        |       +-- custom OpenAI-compatible provider
+        |       +-- typed tools and provider-neutral reasoning
+        |       +-- permissions and high-risk approvals
+        |
+        +-- ComputerController
+                +-- Windows .NET UI Automation / Win32 sidecar
+                +-- macOS Swift Accessibility / CoreGraphics sidecar
+```
+
+Both native controllers implement the same JSON-lines protocol and expose normalized target geometry, display, and interaction-method telemetry. See [docs/architecture.md](docs/architecture.md) and [docs/computer-use.md](docs/computer-use.md).
+
+## Safety and privacy
+
+OpenUse deliberately prohibits arbitrary shell commands, unrestricted PowerShell, unrestricted filesystem APIs, credential capture, automatic software installation, hidden remote access, and invisible background control. Unknown applications require approval. Sensitive and destructive actions require an additional runtime approval and cannot be permanently allowed.
+
+The usage ledger stores model ID, provider, reasoning level, timestamps, status, step/action counts, token counts, known request cost, and duration. It does not store the command, screenshots, passwords, accessibility trees, file contents, or chain-of-thought. See [docs/security.md](docs/security.md) and [docs/V0_2_USAGE_AND_COST.md](docs/V0_2_USAGE_AND_COST.md).
+
+## Development and qualification commands
+
+```text
+pnpm dev
+pnpm verify
+pnpm verify:windows
+pnpm verify:macos
+pnpm qualify:windows
+pnpm qualify:macos
+pnpm dist:windows
+pnpm dist:macos
+```
+
+`verify:*` performs deterministic and native preflight checks. `qualify:*` is an explicit real-desktop harness: it does not inject clicks, calculate outcomes, or use mock agent responses. Complete Windows evidence is documented in [docs/V0_2_WINDOWS_QUALIFICATION.md](docs/V0_2_WINDOWS_QUALIFICATION.md). macOS GUI qualification must be performed on a real Mac; a Windows build cannot prove it.
 
 ## Repository layout
 
 ```text
-apps/desktop          Electron shell, IPC, settings, and React UI
+apps/desktop          Electron shell, IPC, settings, usage, cursor, and React UI
 packages/agent        Closed-loop Computer Use agent
-packages/ai           Model provider abstraction and Gateway adapter
-packages/computer     OS-neutral controller contract and test doubles
+packages/ai           Model catalog, Gateway/custom providers, pricing, reasoning
+packages/computer     OS-neutral controller contract and adapters
 packages/permissions  Application and action permission engine
 packages/protocol     Shared JSON-lines protocol types
-packages/shared       Shared errors and domain types
+packages/shared       Shared domain types and runtime contracts
 native/macos          Swift Accessibility/CoreGraphics controller
 native/windows        .NET Windows UI Automation controller
 docs                  Architecture, security, setup, and qualification guides
+.ocd-designer         v0.2 visual system and design evidence
 ```
 
-## License and contributions
-
-OpenUse is licensed under the Apache License 2.0. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-Contributions should preserve the local-first security boundaries, keep the provider and controller abstractions independent, add deterministic tests where possible, and document any platform-specific behavior. Do not commit API keys, screenshots containing private data, packaged binaries, or qualification output.
+OpenUse is licensed under the Apache License 2.0. See [LICENSE](LICENSE).

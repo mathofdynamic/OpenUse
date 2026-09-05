@@ -1,40 +1,54 @@
 # OpenUse architecture
 
-OpenUse is local-first. The renderer is a view and command surface; it does not receive the Gateway key, hold the agent loop, or call Windows APIs.
+OpenUse is one desktop product. Electron main owns secrets, the agent runtime, permissions, native-process lifecycle, the usage ledger, and the virtual cursor overlay. React is a typed UI client; it never receives provider secrets, runs the agent loop, or calls native APIs directly.
 
 ```mermaid
 flowchart TD
-    User[User command] --> UI[React renderer]
-    UI -->|narrow contextBridge IPC| Main[Electron main runtime]
+    User[User] --> UI[React renderer]
+    UI -->|narrow contextBridge IPC| Main[Electron main]
+    Main --> Settings[Settings and secure storage]
+    Main --> Catalog[Gateway model catalog and cache]
+    Main --> Usage[Privacy-safe usage ledger]
+    Main --> Cursor[Click-through Agent Cursor overlay]
     Main --> Agent[ComputerUseAgent]
-    Agent --> Provider[ModelProvider]
+    Agent --> Provider[Provider-neutral ModelProvider]
     Provider --> Gateway[Vercel AI Gateway]
-    Agent --> Tools[Typed OpenUse tools]
+    Provider --> Custom[Custom OpenAI-compatible endpoint]
+    Agent --> Tools[Typed Computer Use tools]
     Tools --> Policy[Permission and risk layer]
     Policy --> Controller[ComputerController]
-    Controller -->|JSON-lines over stdin/stdout| Sidecar[Native platform sidecar]
-    Sidecar --> Win[Windows .NET 8 UI Automation / Win32]
-    Sidecar --> Mac[macOS Swift AXUIElement / CoreGraphics]
-    UI -. status/events .-> Main
-    Main -->|redacted timeline events| UI
+    Controller --> Win[Windows .NET sidecar]
+    Controller --> Mac[macOS Swift sidecar]
+    Win --> Desktop[User desktop]
+    Mac --> Desktop
 ```
-
-## Process ownership
-
-Electron main starts the sidecar only when a task needs it. The sidecar is a child process with private stdin/stdout, no listening socket, and no general shell interface. Each request has an ID and receives exactly one structured response. If the task is stopped, the main process aborts the model request, rejects pending protocol requests, and sends an internal cancellation message; the sidecar drains the cancelled action on its STA worker and stays reusable. Hard termination is reserved for sidecar failure, startup cancellation, or application shutdown.
 
 ## Package boundaries
 
-- `packages/shared` contains domain types, error codes, redaction helpers, and timeline contracts.
-- `packages/protocol` contains the JSON-lines method/result map and Zod validation for native messages.
-- `packages/computer` owns the platform-neutral controller interface, the protocol-backed controller adapter, and deterministic test doubles.
-- `packages/permissions` owns app-level access, session approvals, risk classification, and high-risk approval hooks.
-- `packages/ai` owns `ModelProvider` and the Gateway implementation. It knows nothing about Windows or the UI.
-- `packages/agent` owns tool schemas, observation/action ordering, step limits, cancellation, and concise event summaries.
-- `apps/desktop` composes all services, owns Electron lifecycle and secrets, and exposes a narrow renderer API.
-- `native/windows` implements Windows observation, UI Automation interaction, keyboard/mouse fallback, and screen capture.
-- `native/macos` implements macOS AX observation/actions, AppKit application/window management, CoreGraphics capture, and CGEvent keyboard/mouse fallback.
+- `packages/shared`: settings, model metadata, cost, cursor, and timeline contracts.
+- `packages/protocol`: Zod-validated JSON-lines method/result maps for native controllers.
+- `packages/computer`: platform-neutral controller interface and protocol adapter.
+- `packages/permissions`: app-level access, session approvals, risk classification, and high-risk approval hooks.
+- `packages/ai`: Gateway catalog parsing/cache integration, Gateway provider, custom OpenAI-compatible provider, pricing, reasoning compatibility, and cost metadata validation. It knows nothing about Windows or macOS.
+- `packages/agent`: bounded manual loop, tool schemas, observation/action ordering, cancellation, concise events, and cursor telemetry emission.
+- `apps/desktop`: composition root, IPC, settings migration, secure storage, usage persistence, overlay lifecycle, and shared renderer.
+- `native/windows`: UI Automation, Win32 input/capture, per-monitor DPI, and Windows target geometry.
+- `native/macos`: AXUIElement/AppKit/CoreGraphics actions, capture, permissions, and global display-point geometry.
 
-## Why the native controller is isolated
+## Runtime ownership
 
-Windows UI Automation and macOS Accessibility are native, stateful APIs with desktop-session, privacy, and coordinate-system concerns. Keeping each in a sidecar avoids putting OS-specific bindings and failure modes into the renderer, lets the TypeScript agent use one stable contract, and lets a future Linux controller be added without changing the agent.
+The agent performs one provider request at a time, executes returned tools serially, observes again, and continues until `computer_finish`, cancellation, an error, or the bounded action limit. After every model request the main runtime records token usage and, when supplied and validated by Gateway metadata, the actual request cost. A deduplication key prevents a repeated runtime event from double-counting a request.
+
+The native sidecar is a child process using private JSON-lines stdin/stdout. It does not open a listener or expose a general shell. Stop aborts the provider request, rejects pending protocol work, sends the internal cancellation message, hides the cursor, and leaves the sidecar reusable after its bounded action drains.
+
+## Packaged resource resolution
+
+Development resolves the current platform controller from the repository's published/build output. Installed Windows builds resolve `resources/native/windows/OpenUse.WindowsController.exe`; installed macOS builds resolve the bundled `Contents/MacOS/OpenUseMacController`. No production path depends on a developer checkout.
+
+## Shared platform contract
+
+Native action results may include `targetPoint`, `targetBounds`, `display`, and `coordinateSystem`. The agent forwards those values to the main process as redacted cursor telemetry. Windows reports physical virtual-screen coordinates with per-monitor scale diagnostics. macOS reports global desktop points while captures retain physical pixel dimensions and an explicit mapping. The renderer never receives a raw accessibility tree or private UI content solely for drawing the cursor.
+
+## Appearance layer
+
+The BrowserWindow is transparent where supported, with macOS `under-window` vibrancy and Windows Acrylic attempted through Electron's native API. The renderer supplies a neutral material fallback and applies the user-selected blur and background opacity to the material layer only. Text and controls remain crisp. The application does not turn the whole content tree transparent.

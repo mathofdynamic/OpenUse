@@ -1,6 +1,6 @@
 # Reference research
 
-Research was performed against the public repositories on 2026-09-01; the Windows DPI API review was added on 2026-09-02.
+Research was performed against the public repositories and official product documentation on 2026-09-05; the Windows DPI API review was added on 2026-09-02.
 
 - T3 Code `b883fc066ea5c9bebbe1c3e9b4bc2471aab3685f` — MIT
 - OpenAI Codex `3a04482645b695085f4daf7c6310ab8592653fea` — Apache-2.0
@@ -34,7 +34,7 @@ References: [Gateway provider](https://github.com/vercel/ai/blob/main/content/pr
 
 ## Decisions derived from the research
 
-1. Use a single local Electron main-process runtime instead of a network server for the MVP.
+1. Use a single local Electron main-process runtime instead of a network server for the desktop product.
 2. Keep the native controller behind an OS-neutral `ComputerController` interface and a typed JSON-lines protocol.
 3. Use a manual AI SDK loop with `generateText`, one step at a time, with a 30-tool-call cap.
 4. Make permissions and high-risk approval runtime-owned; the model never supplies an authoritative risk classification.
@@ -45,3 +45,10 @@ References: [Gateway provider](https://github.com/vercel/ai/blob/main/content/pr
 The native sidecar sets `HighDpiMode.PerMonitorV2` at process startup and uses `GetDpiForWindow` for per-monitor diagnostics. Microsoft documents `GetDpiForMonitor` as unsuitable for a per-monitor-aware caller, so it is not used. Window captures report the target window DPI; full virtual-screen captures retain physical capture bounds and dimensions for the image-to-desktop mapping.
 
 References: [GetDpiForMonitor](https://learn.microsoft.com/en-us/windows/win32/api/shellscalingapi/nf-shellscalingapi-getdpiformonitor), [GetDpiForWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getdpiforwindow), and [.NET HighDpiMode](https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.highdpimode?view=windowsdesktop-10.0).
+
+## OpenUse v0.2 current API decisions
+
+- Electron 43 exposes BrowserWindow transparency, `vibrancy`, and `visualEffectState`; Windows native material support is attempted through the available `setBackgroundMaterial` API and falls back cleanly when unavailable. See the [BrowserWindow](https://www.electronjs.org/docs/latest/api/browser-window) and [BaseWindow](https://www.electronjs.org/docs/latest/api/base-window) references.
+- Vercel AI Gateway's current model catalog is fetched from `https://ai-gateway.vercel.sh/v1/models`, parsed with Zod, and cached locally. The parser uses catalog tags/modalities and tool metadata to determine Computer Use compatibility; it does not assume a fixed four-model list. See [Gateway models and providers](https://vercel.com/docs/ai-gateway/models-and-providers) and the [Gateway REST API](https://vercel.com/docs/ai-gateway/openai-compat/rest-api).
+- Gateway pricing is treated as live metadata, including tiers. Provider request metadata is validated before `gateway.cost` is recorded. The custom endpoint uses the AI SDK OpenAI-compatible provider instead of a hand-written protocol. See [AI SDK Gateway](https://ai-sdk.dev/providers/ai-sdk-providers/ai-gateway) and [OpenAI-compatible providers](https://ai-sdk.dev/providers/openai-compatible-providers).
+- Reasoning is passed through the provider-neutral AI SDK request option and constrained by each model's advertised effort values. Unsupported selections resolve to Provider default rather than being sent blindly. See [AI SDK `generateText`](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text).

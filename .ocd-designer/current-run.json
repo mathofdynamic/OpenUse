@@ -1,10 +1,10 @@
 {
   "schema_version": "0.2.0",
-  "run_id": "run-20260901T140910Z",
+  "run_id": "run-20260905T000000Z",
   "status": "active",
-  "stage": "BUILDING",
-  "started_at": "2026-09-01T14:09:10Z",
-  "updated_at": "2026-09-01T15:15:00Z",
+  "stage": "VERIFYING",
+  "started_at": "2026-09-05T00:00:00Z",
+  "updated_at": "2026-09-05T00:00:00Z",
   "checkpoints": [
     {
       "id": "CP-0001",
@@ -43,11 +43,11 @@
       "from_stage": "PLAN_PENDING",
       "stage": "BUILDING",
       "status": "completed",
-      "captured_at": "2026-09-01T15:15:00Z",
-      "notes": "Implementation and verification are proceeding against the confirmed plan."
+      "captured_at": "2026-09-05T00:00:00Z",
+      "notes": "v0.2 implementation is complete; deterministic, native, packaging, and qualification evidence are being separated before release acceptance."
     }
   ],
-  "next_action": "Finish source and Windows verification gates before any release-candidate transition.",
+  "next_action": "Complete real interactive Windows Gateway/task and reliability qualification, then obtain Mac-native evidence before release acceptance.",
   "plan_hash": "61d5d3d9a857503fe331aac6dda2bf40d5f5b8d45889a2c0ebf1649e90f61980",
   "plan_approval_status": "confirmed"
 }
