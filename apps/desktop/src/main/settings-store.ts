@@ -8,14 +8,16 @@ import type {
   PermissionLevel,
   PermissionRecord,
   ProviderId,
+  Locale,
   ReasoningEffort,
 } from "@openuse/shared";
 
-export const SETTINGS_VERSION = 3 as const;
+export const SETTINGS_VERSION = 4 as const;
 export const DEFAULT_PRIMARY_COLOR = "#c8f36a";
 export const DEFAULT_BACKGROUND_BLUR = 18;
 export const DEFAULT_BACKGROUND_OPACITY = 0.78;
 export const DEFAULT_SHOW_AGENT_CURSOR = true;
+export const DEFAULT_LOCALE: Locale = "en";
 
 export interface PersistedCustomProvider {
   baseUrl: string;
@@ -25,6 +27,7 @@ export interface PersistedCustomProvider {
 
 export interface PersistedSettings {
   version: typeof SETTINGS_VERSION;
+  locale: Locale;
   provider: ProviderId;
   modelId: string;
   permissions: PermissionRecord[];
@@ -39,9 +42,14 @@ export interface PersistedSettings {
 const LEGACY_DEFAULT_MODEL_ID = "openai/gpt-5.4";
 const REASONING_EFFORTS: ReasoningEffort[] = ["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"];
 
+function sanitizeLocale(value: unknown, fallback: Locale = DEFAULT_LOCALE): Locale {
+  return value === "fa" || value === "en" ? value : fallback;
+}
+
 export function defaultSettings(): PersistedSettings {
   return {
     version: SETTINGS_VERSION,
+    locale: DEFAULT_LOCALE,
     provider: "vercel-gateway",
     modelId: DEFAULT_MODEL_ID,
     permissions: defaultPermissionRecords(),
@@ -106,6 +114,7 @@ function sanitizeCustomProvider(value: unknown, fallback: PersistedCustomProvide
 
 export class SettingsStore {
   private value: PersistedSettings = defaultSettings();
+  private persistQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly filePath: string) {}
 
@@ -117,6 +126,7 @@ export class SettingsStore {
       const migrateLegacyDefault = parsed.version === 1 && storedModelId === LEGACY_DEFAULT_MODEL_ID;
       this.value = {
         version: SETTINGS_VERSION,
+        locale: sanitizeLocale(parsed.locale, defaults.locale),
         provider: parsed.provider === "custom-openai-compatible" ? parsed.provider : defaults.provider,
         modelId: migrateLegacyDefault ? defaults.modelId : storedModelId ?? defaults.modelId,
         permissions: Array.isArray(parsed.permissions) ? sanitizePermissions(parsed.permissions) : defaults.permissions,
@@ -144,6 +154,11 @@ export class SettingsStore {
 
   async setModel(modelId: string): Promise<void> {
     this.value.modelId = safeString(modelId, this.value.modelId, 240);
+    await this.persist();
+  }
+
+  async setLocale(locale: Locale): Promise<void> {
+    this.value.locale = sanitizeLocale(locale);
     await this.persist();
   }
 
@@ -191,6 +206,7 @@ export class SettingsStore {
   publicSettings(apiKeyConfigured: boolean, customApiKeyConfigured: boolean): AppSettings {
     return {
       provider: this.value.provider,
+      locale: this.value.locale,
       modelId: this.value.modelId,
       apiKeyConfigured,
       permissions: this.value.permissions.map((record) => ({ ...record })),
@@ -208,10 +224,14 @@ export class SettingsStore {
   }
 
   private async persist(): Promise<void> {
-    await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
-    const temporaryPath = `${this.filePath}.${process.pid}.tmp`;
-    await writeFile(temporaryPath, `${JSON.stringify(this.value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    await rename(temporaryPath, this.filePath);
+    const operation = this.persistQueue.then(async () => {
+      await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
+      const temporaryPath = `${this.filePath}.${process.pid}.tmp`;
+      await writeFile(temporaryPath, `${JSON.stringify(this.value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+      await rename(temporaryPath, this.filePath);
+    });
+    this.persistQueue = operation.catch(() => {});
+    await operation;
   }
 }
 

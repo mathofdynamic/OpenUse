@@ -1,7 +1,8 @@
-import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, safeStorage, shell } from "electron";
+import type { MenuItemConstructorOptions } from "electron";
 import { join } from "node:path";
 import { z } from "zod";
-import type { PermissionDecision, PermissionLevel, RuntimeEvent } from "@openuse/shared";
+import type { Locale, PermissionDecision, PermissionLevel, RuntimeEvent } from "@openuse/shared";
 import { OpenUseError, nowIso, type AppSnapshot, type EngineSelfTestResult } from "@openuse/shared";
 import { testGatewayConnection } from "@openuse/ai";
 import { GatewaySecretStore } from "./secure-store";
@@ -39,6 +40,7 @@ const appPermissionSchema = z.object({
   level: z.enum(["ALLOW", "ASK", "DENY"]),
 });
 const providerSchema = z.object({ provider: z.enum(["vercel-gateway", "custom-openai-compatible"]) });
+const localeSchema = z.object({ locale: z.enum(["en", "fa"]) });
 const reasoningSchema = z.object({ reasoningEffort: z.enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"]) });
 const appearanceSchema = z.object({
   primaryColor: z.string().optional(),
@@ -51,6 +53,66 @@ const customProviderSchema = z.object({
   modelId: z.string().trim().max(240).optional(),
   capabilities: z.object({ toolCalling: z.boolean(), vision: z.boolean(), reasoning: z.boolean() }).optional(),
 });
+
+function installApplicationMenu(locale: Locale): void {
+  const labels = locale === "fa"
+    ? {
+        file: "فایل", close: "بستن", quit: "خروج از OpenUse", edit: "ویرایش", undo: "بازگردانی", redo: "انجام دوباره",
+        cut: "برش", copy: "رونوشت", paste: "چسباندن", selectAll: "انتخاب همه", view: "نمایش", reload: "بارگذاری مجدد",
+        forceReload: "بارگذاری مجدد اجباری", devTools: "ابزارهای توسعه", resetZoom: "بازنشانی اندازه", zoomIn: "بزرگ‌نمایی",
+        zoomOut: "کوچک‌نمایی", fullscreen: "تمام‌صفحه", window: "پنجره", minimize: "کمینه‌سازی", help: "راهنما",
+      }
+    : {
+        file: "File", close: "Close", quit: "Quit OpenUse", edit: "Edit", undo: "Undo", redo: "Redo", cut: "Cut",
+        copy: "Copy", paste: "Paste", selectAll: "Select All", view: "View", reload: "Reload", forceReload: "Force Reload",
+        devTools: "Toggle Developer Tools", resetZoom: "Reset Zoom", zoomIn: "Zoom In", zoomOut: "Zoom Out",
+        fullscreen: "Toggle Full Screen", window: "Window", minimize: "Minimize", help: "Help",
+      };
+  const template: MenuItemConstructorOptions[] = [
+    {
+      label: labels.file,
+      submenu: [
+        { role: "close", label: labels.close },
+        ...(process.platform !== "darwin" ? [{ role: "quit", label: labels.quit } satisfies MenuItemConstructorOptions] : []),
+      ],
+    },
+    {
+      label: labels.edit,
+      submenu: [
+        { role: "undo", label: labels.undo },
+        { role: "redo", label: labels.redo },
+        { type: "separator" },
+        { role: "cut", label: labels.cut },
+        { role: "copy", label: labels.copy },
+        { role: "paste", label: labels.paste },
+        { role: "selectAll", label: labels.selectAll },
+      ],
+    },
+    {
+      label: labels.view,
+      submenu: [
+        { role: "reload", label: labels.reload },
+        { role: "forceReload", label: labels.forceReload },
+        { role: "toggleDevTools", label: labels.devTools },
+        { type: "separator" },
+        { role: "resetZoom", label: labels.resetZoom },
+        { role: "zoomIn", label: labels.zoomIn },
+        { role: "zoomOut", label: labels.zoomOut },
+        { type: "separator" },
+        { role: "togglefullscreen", label: labels.fullscreen },
+      ],
+    },
+    {
+      label: labels.window,
+      submenu: [
+        { role: "minimize", label: labels.minimize },
+        { role: "close", label: labels.close },
+      ],
+    },
+    { label: labels.help, submenu: [{ role: "toggleDevTools", label: labels.devTools }] },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
 function assertSender(event: Electron.IpcMainInvokeEvent): void {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new OpenUseError("IPC_ERROR", "Unknown IPC sender.");
@@ -81,6 +143,13 @@ function installIpc(): void {
   ipcMain.handle("openuse:set-provider", async (event, raw: unknown) => {
     assertSender(event);
     await settings.setProvider(providerSchema.parse(raw).provider);
+    return publicSnapshot();
+  });
+  ipcMain.handle("openuse:set-locale", async (event, raw: unknown) => {
+    assertSender(event);
+    const locale = localeSchema.parse(raw).locale;
+    await settings.setLocale(locale);
+    installApplicationMenu(locale);
     return publicSnapshot();
   });
   ipcMain.handle("openuse:set-reasoning", async (event, raw: unknown) => {
@@ -219,6 +288,7 @@ async function bootstrap(): Promise<void> {
   await app.whenReady();
   settings = new SettingsStore(join(app.getPath("userData"), "settings.json"));
   await settings.initialize();
+  installApplicationMenu(settings.persisted.locale);
   secrets = new GatewaySecretStore(join(app.getPath("userData"), "secrets.json"), safeStorage);
   modelCatalog = new ModelCatalogStore(join(app.getPath("userData"), "model-catalog.json"));
   await modelCatalog.initialize();

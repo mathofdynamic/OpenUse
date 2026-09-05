@@ -1,5 +1,7 @@
 export type ProviderId = "vercel-gateway" | "custom-openai-compatible";
 
+export type Locale = "en" | "fa";
+
 export type ReasoningEffort = "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface PricingTier {
@@ -222,6 +224,7 @@ export interface EngineStatus {
 }
 
 export interface AppSettings {
+  locale: Locale;
   provider: ProviderId;
   modelId: string;
   apiKeyConfigured: boolean;

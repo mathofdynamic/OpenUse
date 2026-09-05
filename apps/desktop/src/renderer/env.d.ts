@@ -7,6 +7,7 @@ declare global {
       getSnapshot(): Promise<AppSnapshot>;
       setModel(modelId: string): Promise<AppSnapshot>;
       setProvider(provider: ProviderId): Promise<AppSnapshot>;
+      setLocale(locale: "en" | "fa"): Promise<AppSnapshot>;
       setReasoningEffort(reasoningEffort: ReasoningEffort): Promise<AppSnapshot>;
       setAppearance(settings: { primaryColor?: string; backgroundBlur?: number; backgroundOpacity?: number; showAgentCursor?: boolean }): Promise<AppSnapshot>;
       setCustomProvider(settings: { baseUrl?: string; modelId?: string; capabilities?: { toolCalling: boolean; vision: boolean; reasoning: boolean } }): Promise<AppSnapshot>;

@@ -6,6 +6,7 @@ const api = {
   getSnapshot: (): Promise<AppSnapshot> => ipcRenderer.invoke("openuse:get-snapshot"),
   setModel: (modelId: string): Promise<AppSnapshot> => ipcRenderer.invoke("openuse:set-model", { modelId }),
   setProvider: (provider: ProviderId): Promise<AppSnapshot> => ipcRenderer.invoke("openuse:set-provider", { provider }),
+  setLocale: (locale: "en" | "fa"): Promise<AppSnapshot> => ipcRenderer.invoke("openuse:set-locale", { locale }),
   setReasoningEffort: (reasoningEffort: ReasoningEffort): Promise<AppSnapshot> => ipcRenderer.invoke("openuse:set-reasoning", { reasoningEffort }),
   setAppearance: (settings: { primaryColor?: string; backgroundBlur?: number; backgroundOpacity?: number; showAgentCursor?: boolean }): Promise<AppSnapshot> => ipcRenderer.invoke("openuse:set-appearance", settings),
   setCustomProvider: (settings: { baseUrl?: string; modelId?: string; capabilities?: { toolCalling: boolean; vision: boolean; reasoning: boolean } }): Promise<AppSnapshot> => ipcRenderer.invoke("openuse:set-custom-provider", settings),
