@@ -106,6 +106,10 @@ const browserPreviewBridge: Window["openuse"] = {
   stopTask: async () => undefined,
   refreshModelCatalog: async () => emptySnapshot,
   resetUsage: async () => emptySnapshot,
+  minimizeWindow: async () => undefined,
+  toggleMaximizeWindow: async () => false,
+  closeWindow: async () => undefined,
+  onWindowState: () => () => undefined,
   decidePermission: async () => undefined,
   setAppPermission: async () => undefined,
   onEvent: () => () => undefined,
@@ -302,7 +306,9 @@ export function App() {
 
   return (
     <LocaleContext.Provider value={locale}>
-    <div className={`app-shell ${locale === "fa" ? "app-shell-rtl" : ""}`} dir={locale === "fa" ? "rtl" : "ltr"} lang={locale} style={appStyle}>
+    <div className={`app-window ${locale === "fa" ? "app-window-rtl" : ""}`} dir={locale === "fa" ? "rtl" : "ltr"} lang={locale} style={appStyle}>
+      <WindowTitleBar />
+      <div className={`app-shell ${locale === "fa" ? "app-shell-rtl" : ""}`} dir={locale === "fa" ? "rtl" : "ltr"}>
       <div className="material-layer" aria-hidden="true" />
       <aside className="side-rail" aria-label={t("OpenUse navigation")}>
         <BrandLockup />
@@ -359,9 +365,28 @@ export function App() {
 
       {permission && <PermissionDialog request={permission} onDecision={(decision) => { void runtimeApi.decidePermission(permission.id, decision); setPermission(undefined); }} onStop={() => { setPermission(undefined); void stopTask(); }} />}
       {settingsOpen && <SettingsDialog settings={settings} models={models} catalogStatus={catalogStatus} usage={usage} apiKeyDraft={apiKeyDraft} customKeyDraft={customKeyDraft} onApiKeyChange={setApiKeyDraft} onCustomKeyChange={setCustomKeyDraft} onClose={() => setSettingsOpen(false)} onSaveGateway={(modelId) => void saveGateway(modelId)} onSaveCustom={saveCustomProvider} onTestConnection={(modelId) => void testConnection(modelId)} connectionTest={connectionTest} onProvider={(provider) => void runtimeApi.setProvider(provider).then(applySnapshot)} onLocale={updateLocale} onReasoning={updateReasoning} onAppearance={updateAppearance} onRefreshModels={() => void runtimeApi.refreshModelCatalog().then(applySnapshot)} onResetUsage={() => void runtimeApi.resetUsage().then(applySnapshot)} onPermissionChange={(appName, level, appIdentity) => void updatePermission(appName, level, appIdentity)} onRunSelfTest={() => void runtimeApi.runSelfTest()} onOpenMacPrivacy={(area) => void runtimeApi.openMacPrivacy(area)} />}
+      </div>
     </div>
     </LocaleContext.Provider>
   );
+}
+
+function WindowTitleBar() {
+  const { t } = useTranslation();
+  const [maximized, setMaximized] = useState(false);
+
+  useEffect(() => runtimeApi.onWindowState((state) => setMaximized(state.maximized)), []);
+
+  return <header className="window-titlebar" aria-label={t("Window controls")}>
+    <div className="window-titlebar-drag" onDoubleClick={() => void runtimeApi.toggleMaximizeWindow()}>
+      <div className="window-titlebar-brand"><div className="brand-mark window-titlebar-mark" aria-hidden="true"><span /></div><div><div className="window-titlebar-name">OpenUse</div><div className="window-titlebar-caption">{t("Control room")}</div></div></div>
+    </div>
+    <div className="window-controls" aria-label={t("Window controls")}>
+      <button className="window-control" type="button" aria-label={t("Minimize window")} onClick={() => void runtimeApi.minimizeWindow()}><Glyph name="minus" /></button>
+      <button className="window-control" type="button" aria-label={t(maximized ? "Restore window" : "Maximize window")} onClick={() => void runtimeApi.toggleMaximizeWindow().then(setMaximized)}><Glyph name={maximized ? "restore" : "square"} /></button>
+      <button className="window-control window-control-close" type="button" aria-label={t("Close window")} onClick={() => void runtimeApi.closeWindow()}><Glyph name="close" /></button>
+    </div>
+  </header>;
 }
 
 function handleRuntimeEvent(event: RuntimeEvent, setters: {
@@ -576,5 +601,5 @@ function QualificationPanel({ engine, debug, selfTest }: { engine: EngineStatus;
 function primaryForeground(hex: string): string { const value = hex.replace("#", ""); if (value.length !== 6) return "#0a0a0a"; const channels = [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16) / 255).map((channel) => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4); const luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]; return luminance > 0.52 ? "#0a0a0a" : "#ffffff"; }
 type ConnectionTestState = "idle" | "testing" | GatewayConnectionResult;
 
-function Glyph({ name }: { name: GlyphName }) { const paths: Record<GlyphName, string> = { activity: "M3 12h4l2-7 4 14 2-7h6", sliders: "M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4", chevron: "m7 10 5 5 5-5", arrow: "M4 12h15m-6-6 6 6-6 6", spark: "m12 3 1.5 6.5L20 12l-6.5 1.5L12 20l-1.5-6.5L4 12l6.5-2.5L12 3Z", tool: "M14.5 6.5a4 4 0 0 0-5.2 5.2L4 17l3 3 5.3-5.3a4 4 0 0 0 5.2-5.2l-2.4 2.4-2.4-2.4 1.8-2.9Z", desktop: "M4 5h16v11H4zM9 20h6M12 16v4", shield: "M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6l8-3Z", check: "m5 12 4 4L19 6", alert: "M12 4 21 20H3L12 4Zm0 6v4m0 3h.01", lock: "M6 10h12v10H6zM8 10V7a4 4 0 0 1 8 0v3", chart: "M4 19V5m0 14h16M8 16v-5m4 5V7m4 9v-8" }; return <svg className="glyph" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name]} /></svg>; }
-type GlyphName = "activity" | "sliders" | "chevron" | "arrow" | "spark" | "tool" | "desktop" | "shield" | "check" | "alert" | "lock" | "chart";
+function Glyph({ name }: { name: GlyphName }) { const paths: Record<GlyphName, string> = { activity: "M3 12h4l2-7 4 14 2-7h6", sliders: "M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4", chevron: "m7 10 5 5 5-5", arrow: "M4 12h15m-6-6 6 6-6 6", spark: "m12 3 1.5 6.5L20 12l-6.5 1.5L12 20l-1.5-6.5L4 12l6.5-2.5L12 3Z", tool: "M14.5 6.5a4 4 0 0 0-5.2 5.2L4 17l3 3 5.3-5.3a4 4 0 0 0 5.2-5.2l-2.4 2.4-2.4-2.4 1.8-2.9Z", desktop: "M4 5h16v11H4zM9 20h6M12 16v4", shield: "M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6l8-3Z", check: "m5 12 4 4L19 6", alert: "M12 4 21 20H3L12 4Zm0 6v4m0 3h.01", lock: "M6 10h12v10H6zM8 10V7a4 4 0 0 1 8 0v3", chart: "M4 19V5m0 14h16M8 16v-5m4 5V7m4 9v-8", minus: "M5 12h14", square: "M5 5h14v14H5z", restore: "M7 7h10v10H7zM7 10H5v9h9v-2", close: "M6 6l12 12M18 6 6 18" }; return <svg className="glyph" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name]} /></svg>; }
+type GlyphName = "activity" | "sliders" | "chevron" | "arrow" | "spark" | "tool" | "desktop" | "shield" | "check" | "alert" | "lock" | "chart" | "minus" | "square" | "restore" | "close";

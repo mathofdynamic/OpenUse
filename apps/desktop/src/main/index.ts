@@ -195,6 +195,21 @@ function installIpc(): void {
     await usage.reset();
     return publicSnapshot();
   });
+  ipcMain.handle("openuse:window-minimize", (event) => {
+    assertSender(event);
+    mainWindow?.minimize();
+  });
+  ipcMain.handle("openuse:window-toggle-maximize", (event) => {
+    assertSender(event);
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+    return mainWindow.isMaximized();
+  });
+  ipcMain.handle("openuse:window-close", (event) => {
+    assertSender(event);
+    mainWindow?.close();
+  });
   ipcMain.handle("openuse:self-test", async (event) => {
     assertSender(event);
     await publishNativeSelfTest();
@@ -245,6 +260,8 @@ function createWindow(): void {
     height: 860,
     minWidth: 480,
     minHeight: 560,
+    frame: false,
+    autoHideMenuBar: process.platform === "win32",
     backgroundColor: "#00000000",
     transparent: true,
     ...(process.platform === "darwin" ? { vibrancy: "under-window", visualEffectState: "active" } : {}),
@@ -263,6 +280,12 @@ function createWindow(): void {
     }
   }
   mainWindow.once("ready-to-show", () => focusMainWindow());
+  const publishWindowState = (): void => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send("openuse:window-state", { maximized: mainWindow.isMaximized() });
+  };
+  mainWindow.on("maximize", publishWindowState);
+  mainWindow.on("unmaximize", publishWindowState);
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) void mainWindow.loadURL(devUrl);
   else void mainWindow.loadFile(join(__dirname, "renderer", "index.html"));

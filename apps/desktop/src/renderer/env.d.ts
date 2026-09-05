@@ -21,6 +21,10 @@ declare global {
       stopTask(): Promise<void>;
       refreshModelCatalog(): Promise<AppSnapshot>;
       resetUsage(): Promise<AppSnapshot>;
+      minimizeWindow(): Promise<void>;
+      toggleMaximizeWindow(): Promise<boolean>;
+      closeWindow(): Promise<void>;
+      onWindowState(listener: (state: { maximized: boolean }) => void): () => void;
       decidePermission(id: string, decision: PermissionDecision): Promise<void>;
       setAppPermission(appName: string, level: PermissionLevel, appIdentity?: string): Promise<void>;
       onEvent(listener: (event: RuntimeEvent) => void): () => void;

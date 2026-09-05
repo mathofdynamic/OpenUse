@@ -110,7 +110,27 @@ html[dir="rtl"] .technical, html[dir="rtl"] .hex-input, html[dir="rtl"] .hex-inp
 button { color: inherit; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 
-.app-shell { position: relative; display: grid; grid-template-columns: 236px minmax(0, 1fr); height: 100dvh; min-width: 0; overflow: hidden; isolation: isolate; background: transparent; }
+.app-window { position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: transparent; }
+.window-titlebar { position: relative; z-index: 10; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; flex: 0 0 42px; min-height: 42px; padding-inline-start: 14px; border-bottom: 1px solid var(--border); color: var(--text-secondary); background: rgba(7, 7, 7, .76); user-select: none; -webkit-app-region: drag; }
+.window-titlebar::after { position: absolute; inset-inline: 0; bottom: -1px; height: 1px; background: var(--primary); content: ""; opacity: .32; pointer-events: none; }
+.window-titlebar-drag { display: flex; align-items: center; min-width: 0; height: 100%; -webkit-app-region: drag; }
+.window-titlebar-brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.window-titlebar-mark { width: 19px; height: 19px; flex-basis: 19px; border-radius: 6px; }
+.window-titlebar-mark::before { left: 4px; top: 4px; width: 5px; height: 5px; }
+.window-titlebar-mark::after { right: 3px; bottom: 3px; width: 4px; height: 4px; }
+.window-titlebar-mark span { left: 8px; top: 3px; height: 12px; }
+.window-titlebar-name { color: var(--text-primary); font-size: 12px; font-weight: 700; letter-spacing: -.02em; }
+.window-titlebar-caption { margin-top: 1px; color: var(--text-muted); font-size: 8px; letter-spacing: .1em; text-transform: uppercase; }
+.window-controls { display: flex; align-items: stretch; height: 100%; -webkit-app-region: no-drag; }
+.window-control { display: grid; place-items: center; width: 46px; height: 100%; padding: 0; border: 0; border-inline-start: 1px solid rgba(255,255,255,.06); border-radius: 0; color: var(--text-secondary); background: transparent; cursor: pointer; -webkit-app-region: no-drag; }
+.window-control:hover { color: var(--text-primary); background: rgba(255,255,255,.08); }
+.window-control:active { background: rgba(255,255,255,.13); }
+.window-control .glyph { width: 13px; height: 13px; }
+.window-control-close:hover { color: #fff; background: var(--danger); }
+.window-control-close:active { background: color-mix(in srgb, var(--danger) 80%, #000); }
+.app-window-rtl .window-titlebar { direction: ltr; }
+.app-window-rtl .window-titlebar-drag { direction: rtl; }
+.app-shell { position: relative; display: grid; grid-template-columns: 236px minmax(0, 1fr); flex: 1 1 auto; height: auto; min-width: 0; min-height: 0; overflow: hidden; isolation: isolate; background: transparent; }
 .material-layer { position: absolute; z-index: -1; inset: 0; pointer-events: none; background: rgba(8, 8, 8, var(--surface-alpha)); border: 1px solid rgba(255, 255, 255, 0.12); backdrop-filter: blur(var(--background-blur)) saturate(105%); -webkit-backdrop-filter: blur(var(--background-blur)) saturate(105%); }
 .side-rail, .main-column { position: relative; z-index: 1; min-width: 0; }
 .side-rail { display: flex; flex-direction: column; min-height: 0; padding: 26px 18px 20px; border-inline-end: 1px solid var(--border); background: rgba(8, 8, 8, 0.35); }
@@ -497,7 +517,7 @@ h2 { margin-bottom: 0; font-size: 23px; font-weight: 650; letter-spacing: -0.04e
 @media (max-width: 899px) {
   .app-shell { display: block; }
   .side-rail { display: none; }
-  .main-column { height: 100dvh; }
+  .main-column { height: 100%; min-height: 0; }
   .topbar { min-height: 64px; padding: 0 18px; }
   .topbar-brand { min-width: 126px; }
   .topbar-context { margin-inline-start: 4px; }
@@ -520,6 +540,9 @@ h2 { margin-bottom: 0; font-size: 23px; font-weight: 650; letter-spacing: -0.04e
 }
 
 @media (max-width: 639px) {
+  .window-titlebar { flex-basis: 38px; min-height: 38px; padding-inline-start: 10px; }
+  .window-control { width: 40px; }
+  .window-titlebar-caption { display: none; }
   .topbar { flex-wrap: wrap; align-content: center; gap: 7px; padding: 10px 13px; }
   .topbar-brand { min-width: 0; margin-inline-end: auto; }
   .topbar-brand-caption { display: none; }
@@ -573,6 +596,7 @@ h2 { margin-bottom: 0; font-size: 23px; font-weight: 650; letter-spacing: -0.04e
 }
 
 @media (max-width: 419px) {
+  .window-control { width: 38px; }
   .topbar-brand-name { font-size: 13px; }
   .model-picker-compact { width: 121px; }
   .model-picker-compact .model-picker-trigger small { display: none; }

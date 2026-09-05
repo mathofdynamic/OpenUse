@@ -20,6 +20,14 @@ const api = {
   stopTask: (): Promise<void> => ipcRenderer.invoke("openuse:stop-task"),
   refreshModelCatalog: (): Promise<AppSnapshot> => ipcRenderer.invoke("openuse:refresh-model-catalog"),
   resetUsage: (): Promise<AppSnapshot> => ipcRenderer.invoke("openuse:reset-usage"),
+  minimizeWindow: (): Promise<void> => ipcRenderer.invoke("openuse:window-minimize"),
+  toggleMaximizeWindow: (): Promise<boolean> => ipcRenderer.invoke("openuse:window-toggle-maximize"),
+  closeWindow: (): Promise<void> => ipcRenderer.invoke("openuse:window-close"),
+  onWindowState: (listener: (state: { maximized: boolean }) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: { maximized: boolean }) => listener(payload);
+    ipcRenderer.on("openuse:window-state", handler);
+    return () => ipcRenderer.removeListener("openuse:window-state", handler);
+  },
   decidePermission: (id: string, decision: PermissionDecision): Promise<void> =>
     ipcRenderer.invoke("openuse:permission-decision", { id, decision }),
   setAppPermission: (appName: string, level: PermissionLevel, appIdentity?: string): Promise<void> =>
