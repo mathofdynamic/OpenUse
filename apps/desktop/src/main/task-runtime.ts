@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { ComputerUseAgent } from "@openuse/agent";
-import { GatewayModelProvider, getModelCapabilities } from "@openuse/ai";
+import { CustomOpenAICompatibleProvider, GatewayModelProvider, customModelDefinition, getModelDefinition, resolveReasoningEffort } from "@openuse/ai";
 import { NativeComputerController } from "@openuse/computer";
 import {
   InMemoryPermissionStore,
@@ -13,19 +13,26 @@ import {
   asOpenUseError,
   nowIso,
   type AppSettings,
+  type ModelDefinition,
+  type OpenUseErrorCode,
   type PermissionDecision,
   type PermissionRequest,
   type PermissionRecord,
+  type PermissionLevel,
+  type ProviderId,
   type RuntimeEvent,
 } from "@openuse/shared";
-import type { PermissionLevel } from "@openuse/shared";
 import type { SettingsStore } from "./settings-store";
 import type { NativeEngineProcess } from "./native-process";
+import type { UsageStore } from "./usage-store";
 
-interface TaskRuntimeOptions {
+export interface TaskRuntimeOptions {
   settings: SettingsStore;
   engine: NativeEngineProcess;
   readApiKey: () => Promise<string | undefined>;
+  readCustomApiKey: () => Promise<string | undefined>;
+  getModels: () => ModelDefinition[];
+  usage: UsageStore;
   emit: (event: RuntimeEvent) => void;
   qualificationMode?: boolean;
 }
@@ -45,10 +52,7 @@ interface PendingPermission {
 class PersistentPermissionStore implements PermissionStore {
   private readonly memory: InMemoryPermissionStore;
 
-  constructor(
-    records: PermissionRecord[],
-    private readonly persist: (appName: string, level: PermissionLevel, appIdentity?: string) => Promise<void>,
-  ) {
+  constructor(records: PermissionRecord[], private readonly persist: (appName: string, level: PermissionLevel, appIdentity?: string) => Promise<void>) {
     this.memory = new InMemoryPermissionStore(records);
   }
 
@@ -66,19 +70,11 @@ export class TaskRuntime {
   private readonly pendingPermissions = new Map<string, PendingPermission>();
 
   constructor(private readonly options: TaskRuntimeOptions) {
-    this.permissions = new PersistentPermissionStore(
-      options.settings.persisted.permissions,
-      (appName, level, appIdentity) => options.settings.setPermission(appName, level, appIdentity),
-    );
+    this.permissions = new PersistentPermissionStore(options.settings.persisted.permissions, (appName, level, appIdentity) => options.settings.setPermission(appName, level, appIdentity));
   }
 
-  get isRunning(): boolean {
-    return this.active !== undefined;
-  }
-
-  get permissionRecords(): PermissionRecord[] {
-    return this.permissions.records();
-  }
+  get isRunning(): boolean { return this.active !== undefined; }
+  get permissionRecords(): PermissionRecord[] { return this.permissions.records(); }
 
   async start(command: string): Promise<void> {
     if (this.active) throw new OpenUseError("UNSUPPORTED_ACTION", "Another task is already running.");
@@ -86,57 +82,62 @@ export class TaskRuntime {
     const abort = new AbortController();
     const startedAt = Date.now();
     let actionCount = 0;
-    const modelId = this.options.settings.persisted.modelId;
-    this.options.emit({ type: "task.started", taskId, command, modelId, capabilities: getModelCapabilities(modelId), at: nowIso() });
+    let stepCount = 0;
+    const stored = this.options.settings.persisted;
+    const providerId: ProviderId = stored.provider;
+    const modelId = providerId === "custom-openai-compatible" ? stored.customProvider.modelId : stored.modelId;
+    const model = providerId === "custom-openai-compatible"
+      ? customModelDefinition({ baseUrl: stored.customProvider.baseUrl, modelId, capabilities: stored.customProvider.capabilities })
+      : getModelDefinition(modelId, this.options.getModels());
+    const capabilities = model?.capabilities ?? { toolCalling: false, vision: false };
+    const reasoningEffort = resolveReasoningEffort(model, stored.reasoningEffort) ?? "provider-default";
+    this.options.usage.beginTask({ taskId, modelId, provider: providerId, reasoningEffort });
+    this.options.emit({ type: "task.started", taskId, command, modelId, capabilities, at: nowIso() });
     this.options.emit({ type: "engine.status", status: this.options.engine.status, at: nowIso() });
 
-    const prompt: PermissionPrompt = {
-      request: (request, signal) => this.waitForPermission(taskId, request, signal),
-    };
+    const prompt: PermissionPrompt = { request: (request, signal) => this.waitForPermission(taskId, request, signal) };
     const permissionEngine = new PermissionEngine(this.permissions, prompt);
-    const agent = new ComputerUseAgent(
-      new GatewayModelProvider(this.options.readApiKey),
-      new NativeComputerController(this.options.engine),
-      permissionEngine,
-    );
+    const provider = providerId === "custom-openai-compatible"
+      ? new CustomOpenAICompatibleProvider({
+          readApiKey: this.options.readCustomApiKey,
+          baseUrl: stored.customProvider.baseUrl,
+          modelId,
+          capabilities: stored.customProvider.capabilities,
+        })
+      : new GatewayModelProvider(this.options.readApiKey, this.options.getModels());
+    const agent = new ComputerUseAgent(provider, new NativeComputerController(this.options.engine), permissionEngine);
+    const finish = (status: "completed" | "stopped" | "error", summary: string, resultActionCount: number, durationMs: number, errorCode?: OpenUseErrorCode) => {
+      this.options.usage.finishTask(taskId, status, stepCount, resultActionCount, durationMs);
+      this.options.emit({ type: "task.finished", taskId, status, summary, actionCount: resultActionCount, durationMs, ...(errorCode ? { errorCode } : {}), at: nowIso() });
+    };
     const promise = agent.run({
       taskId,
       command,
       modelId,
       maxActions: 30,
       abortSignal: abort.signal,
+      reasoningEffort,
       qualificationMode: this.options.qualificationMode,
       onEvent: (event) => {
-        if (event.type === "action.started") actionCount += 1;
-        this.options.emit(event);
-        if (event.type === "action.completed" || event.type === "action.failed") {
-          this.options.emit({ type: "engine.status", status: this.options.engine.status, at: nowIso() });
+        if (event.type === "agent.step") stepCount = Math.max(stepCount, event.step);
+        if (event.type === "action.started") {
+          actionCount += 1;
+          this.options.usage.recordAction(taskId);
         }
+        if (event.type === "model.usage") {
+          this.options.usage.recordRequest({ taskId, step: event.step, modelId: event.modelId, provider: event.provider, inputTokens: event.inputTokens, outputTokens: event.outputTokens, actualCost: event.actualCost });
+          const usage = this.options.usage.snapshot();
+          event = { ...event, taskCost: this.options.usage.taskCost(taskId), lifetimeSpend: usage.totalKnownSpend };
+        }
+        this.options.emit(event);
+        if (event.type === "action.completed" || event.type === "action.failed") this.options.emit({ type: "engine.status", status: this.options.engine.status, at: nowIso() });
       },
     }).then((result) => {
-      this.options.emit({
-        type: "task.finished",
-        taskId,
-        status: result.status,
-        summary: result.summary,
-        actionCount: result.actionCount,
-        durationMs: Date.now() - startedAt,
-        errorCode: result.errorCode,
-        at: nowIso(),
-      });
+      finish(result.status, result.summary, result.actionCount, Date.now() - startedAt, result.errorCode);
     }).catch((error) => {
       const openUseError = asOpenUseError(error, "MODEL_FAILED");
       const stopped = openUseError.code === "TASK_CANCELLED";
-      this.options.emit({
-        type: "task.finished",
-        taskId,
-        status: stopped ? "stopped" : "error",
-        summary: stopped ? "Task stopped." : openUseError.message,
-        actionCount,
-        durationMs: Date.now() - startedAt,
-        errorCode: openUseError.code,
-        at: nowIso(),
-      });
+      finish(stopped ? "stopped" : "error", stopped ? "Task stopped." : openUseError.message, actionCount, Date.now() - startedAt, openUseError.code);
     }).finally(() => {
       if (this.active?.taskId === taskId) this.active = undefined;
       for (const [id, pending] of this.pendingPermissions) {
@@ -174,8 +175,8 @@ export class TaskRuntime {
     await this.permissions.set(appName, level, appIdentity);
   }
 
-  settings(apiKeyConfigured: boolean): AppSettings {
-    return this.options.settings.publicSettings(apiKeyConfigured);
+  settings(apiKeyConfigured: boolean, customApiKeyConfigured: boolean): AppSettings {
+    return this.options.settings.publicSettings(apiKeyConfigured, customApiKeyConfigured);
   }
 
   private waitForPermission(requestTaskId: string, request: PermissionRequest, signal: AbortSignal): Promise<PermissionDecision> {

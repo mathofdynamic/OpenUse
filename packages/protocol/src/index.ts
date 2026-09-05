@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { EngineSelfTestResult, InteractionMethod } from "@openuse/shared";
+import type { EngineSelfTestResult, InteractionMethod, MonitorDiagnostics } from "@openuse/shared";
 
 export interface Bounds {
   x: number;
@@ -70,6 +70,10 @@ export interface OperationResult {
   detail?: string;
   interactionMethod?: InteractionMethod;
   targetElementId?: string;
+  targetPoint?: { x: number; y: number };
+  targetBounds?: Bounds;
+  display?: MonitorDiagnostics;
+  coordinateSystem?: string;
 }
 
 export interface NativeMethodParams {

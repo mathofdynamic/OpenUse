@@ -20,11 +20,13 @@ import {
   redactText,
   type ActionRisk,
   type ActionTelemetry,
+  type CursorInteraction,
   type InteractionMethod,
   type QualificationDebugSnapshot,
   type QualificationElementSnapshot,
   type QualificationScreenshotSnapshot,
   type QualificationWindowSnapshot,
+  type ReasoningEffort,
   type RuntimeEvent,
 } from "@openuse/shared";
 import type { AgentStepResult, ModelProvider } from "@openuse/ai";
@@ -174,6 +176,7 @@ export interface AgentRunOptions {
   modelId: string;
   maxActions?: number;
   abortSignal: AbortSignal;
+  reasoningEffort?: ReasoningEffort;
   onEvent: (event: RuntimeEvent) => void;
   qualificationMode?: boolean;
 }
@@ -232,6 +235,10 @@ function operationValue(operation: OperationResult, after?: WindowInspection) {
     window: operation.window,
     interactionMethod: operation.interactionMethod,
     targetElementId: operation.targetElementId,
+    targetPoint: operation.targetPoint,
+    targetBounds: operation.targetBounds,
+    display: operation.display,
+    coordinateSystem: operation.coordinateSystem,
     after: after
       ? {
           window: after.window,
@@ -295,6 +302,7 @@ export class ComputerUseAgent {
           messages,
           tools: computerTools,
           abortSignal: options.abortSignal,
+          reasoningEffort: options.reasoningEffort,
         });
       } catch (error) {
         throw asOpenUseError(error, "MODEL_FAILED");
@@ -305,9 +313,15 @@ export class ComputerUseAgent {
           taskId: options.taskId,
           step,
           modelId: options.modelId,
+          provider: this.provider.providerId ?? "vercel-gateway",
           inputTokens: generated.usage.inputTokens,
           outputTokens: generated.usage.outputTokens,
           totalTokens: generated.usage.totalTokens,
+          reasoningEffort: options.reasoningEffort ?? "provider-default",
+          actualCost: generated.actualCost,
+          costSource: generated.costSource ?? (generated.actualCost === undefined ? "unknown" : "gateway"),
+          taskCost: generated.actualCost ?? 0,
+          lifetimeSpend: 0,
           at: nowIso(),
         });
       }
@@ -372,6 +386,23 @@ export class ComputerUseAgent {
             ? { ...execution.telemetry, retryCount }
             : undefined;
           const detail = detailForTimeline(toolName, execution.output);
+          const cursorTarget = execution.telemetry?.targetPoint
+            ? {
+                point: execution.telemetry.targetPoint,
+                bounds: execution.telemetry.targetBounds,
+                display: execution.telemetry.display,
+                coordinateSystem: execution.telemetry.coordinateSystem ?? "unknown",
+              }
+            : undefined;
+          if (cursorTarget) {
+            options.onEvent({
+              type: "cursor",
+              taskId: options.taskId,
+              interaction: cursorInteractionForTool(toolName),
+              target: cursorTarget,
+              at: nowIso(),
+            });
+          }
           options.onEvent({
             type: "action.completed",
             taskId: options.taskId,
@@ -651,7 +682,7 @@ export class ComputerUseAgent {
       case "computer_type_text": {
         const typed = input as ComputerToolInput["computer_type_text"];
         if (isCredentialTarget(typed.role, [typed.name, typed.automationId, typed.className].filter(Boolean).join(" "))) {
-          throw new OpenUseError("CREDENTIAL_INTERACTION_DISABLED", "Credential and password entry is disabled in this MVP.");
+          throw new OpenUseError("CREDENTIAL_INTERACTION_DISABLED", "Credential and password entry is disabled in this runtime.");
         }
         const window = typed.windowId ? await this.appForWindow(typed.windowId, signal) : undefined;
         let selectedElement: WindowInspection["elements"][number] | undefined;
@@ -660,7 +691,7 @@ export class ComputerUseAgent {
           const inspection = await this.computer.inspectWindow(window.id, signal);
           selectedElement = findElement(inspection, typed);
           if (selectedElement && isCredentialTarget(selectedElement.role, [selectedElement.name, selectedElement.automationId, selectedElement.className].filter(Boolean).join(" "))) {
-            throw new OpenUseError("CREDENTIAL_INTERACTION_DISABLED", "Credential and password entry is disabled in this MVP.");
+            throw new OpenUseError("CREDENTIAL_INTERACTION_DISABLED", "Credential and password entry is disabled in this runtime.");
           }
         }
         const focused = window ? { appName: window.app, appIdentity: window.appIdentity } : await this.focusedApplication(signal);
@@ -770,7 +801,22 @@ function operationTelemetry(
     targetWindowId: targetWindow?.id ?? windowId,
     targetWindowTitle: targetWindow?.title,
     targetElementId: operation.targetElementId ?? fallbackElementId,
+    targetPoint: operation.targetPoint,
+    targetBounds: operation.targetBounds,
+    display: operation.display,
+    coordinateSystem: operation.coordinateSystem,
   };
+}
+
+function cursorInteractionForTool(toolName: ComputerToolName): CursorInteraction {
+  switch (toolName) {
+    case "computer_double_click": return "double-click";
+    case "computer_click":
+    case "computer_click_element": return "click";
+    case "computer_type_text": return "typing";
+    case "computer_scroll": return "scroll";
+    default: return "move";
+  }
 }
 
 function screenshotDebug(screenshot: Screenshot): QualificationScreenshotSnapshot {

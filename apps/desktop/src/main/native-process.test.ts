@@ -113,7 +113,7 @@ describe("native sidecar process boundary", () => {
   });
 
   it("cancels an in-flight request without waiting for the native timeout", async () => {
-    await fakeSidecar("IFS= read -r request\nsleep 0.2");
+    await fakeSidecar("while IFS= read -r request; do sleep 1; done");
     const engine = createEngine();
     const abort = new AbortController();
     const request = engine.request("listWindows", {}, abort.signal);

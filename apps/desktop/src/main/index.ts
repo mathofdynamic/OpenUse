@@ -3,13 +3,16 @@ import { join } from "node:path";
 import { z } from "zod";
 import type { PermissionDecision, PermissionLevel, RuntimeEvent } from "@openuse/shared";
 import { OpenUseError, nowIso, type AppSnapshot, type EngineSelfTestResult } from "@openuse/shared";
-import { MODEL_CATALOG, testGatewayConnection } from "@openuse/ai";
+import { testGatewayConnection } from "@openuse/ai";
 import { GatewaySecretStore } from "./secure-store";
 import { SettingsStore } from "./settings-store";
 import { NativeEngineProcess } from "./native-process";
 import { TaskRuntime } from "./task-runtime";
 import { logRuntimeEvent } from "./runtime-logger";
 import { QualificationRecorder } from "./qualification-recorder";
+import { ModelCatalogStore } from "./model-catalog-store";
+import { UsageStore } from "./usage-store";
+import { CursorOverlayManager } from "./cursor-overlay";
 
 let mainWindow: BrowserWindow | undefined;
 let settings: SettingsStore;
@@ -17,6 +20,9 @@ let secrets: GatewaySecretStore;
 let engine: NativeEngineProcess;
 let runtime: TaskRuntime;
 let qualification: QualificationRecorder;
+let modelCatalog: ModelCatalogStore;
+let usage: UsageStore;
+let cursorOverlay: CursorOverlayManager | undefined;
 let qualificationSelfTest: EngineSelfTestResult | undefined;
 let isQuitting = false;
 
@@ -32,16 +38,31 @@ const appPermissionSchema = z.object({
   appIdentity: z.string().trim().min(1).max(240).optional(),
   level: z.enum(["ALLOW", "ASK", "DENY"]),
 });
+const providerSchema = z.object({ provider: z.enum(["vercel-gateway", "custom-openai-compatible"]) });
+const reasoningSchema = z.object({ reasoningEffort: z.enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"]) });
+const appearanceSchema = z.object({
+  primaryColor: z.string().optional(),
+  backgroundBlur: z.number().finite().optional(),
+  backgroundOpacity: z.number().finite().optional(),
+  showAgentCursor: z.boolean().optional(),
+}).partial();
+const customProviderSchema = z.object({
+  baseUrl: z.string().trim().max(500).optional(),
+  modelId: z.string().trim().max(240).optional(),
+  capabilities: z.object({ toolCalling: z.boolean(), vision: z.boolean(), reasoning: z.boolean() }).optional(),
+});
 
 function assertSender(event: Electron.IpcMainInvokeEvent): void {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new OpenUseError("IPC_ERROR", "Unknown IPC sender.");
 }
 
 function publicSnapshot(): Promise<AppSnapshot> {
-  return secrets.isConfigured().then((apiKeyConfigured) => ({
-    settings: runtime.settings(apiKeyConfigured),
+  return Promise.all([secrets.isConfigured(), secrets.isCustomConfigured()]).then(([apiKeyConfigured, customApiKeyConfigured]) => ({
+    settings: runtime.settings(apiKeyConfigured, customApiKeyConfigured),
     engine: engine.status,
     qualification: { enabled: qualification.enabled, runId: qualification.runId, selfTest: qualificationSelfTest },
+    modelCatalog: modelCatalog.snapshot(),
+    usage: usage.snapshot(),
   }));
 }
 
@@ -53,18 +74,57 @@ function installIpc(): void {
   ipcMain.handle("openuse:set-model", async (event, raw: unknown) => {
     assertSender(event);
     const { modelId } = modelSchema.parse(raw);
-    if (!MODEL_CATALOG.some((model) => model.id === modelId)) throw new OpenUseError("MODEL_UNSUPPORTED", "Choose a model from the supported Computer Use catalog.");
+    if (!modelCatalog.snapshot().models.some((model) => model.id === modelId)) throw new OpenUseError("MODEL_UNSUPPORTED", "Choose a model from the current Gateway catalog.");
     await settings.setModel(modelId);
+    return publicSnapshot();
+  });
+  ipcMain.handle("openuse:set-provider", async (event, raw: unknown) => {
+    assertSender(event);
+    await settings.setProvider(providerSchema.parse(raw).provider);
+    return publicSnapshot();
+  });
+  ipcMain.handle("openuse:set-reasoning", async (event, raw: unknown) => {
+    assertSender(event);
+    await settings.setReasoningEffort(reasoningSchema.parse(raw).reasoningEffort);
+    return publicSnapshot();
+  });
+  ipcMain.handle("openuse:set-appearance", async (event, raw: unknown) => {
+    assertSender(event);
+    await settings.setAppearance(appearanceSchema.parse(raw));
+    cursorOverlay?.setAppearance({ color: settings.persisted.primaryColor, enabled: settings.persisted.showAgentCursor });
+    return publicSnapshot();
+  });
+  ipcMain.handle("openuse:set-custom-provider", async (event, raw: unknown) => {
+    assertSender(event);
+    await settings.setCustomProvider(customProviderSchema.parse(raw));
+    return publicSnapshot();
   });
   ipcMain.handle("openuse:save-gateway-key", async (event, raw: unknown) => {
     assertSender(event);
     const { apiKey } = keySchema.parse(raw);
     await secrets.write(apiKey);
+    return publicSnapshot();
+  });
+  ipcMain.handle("openuse:save-custom-key", async (event, raw: unknown) => {
+    assertSender(event);
+    const { apiKey } = keySchema.parse(raw);
+    await secrets.writeCustom(apiKey);
+    return publicSnapshot();
   });
   ipcMain.handle("openuse:test-gateway", async (event, raw: unknown) => {
     assertSender(event);
     const { modelId } = modelSchema.parse(raw);
-    return testGatewayConnection(() => secrets.read(), modelId);
+    return testGatewayConnection(() => secrets.read(), modelId, undefined, modelCatalog.snapshot().models);
+  });
+  ipcMain.handle("openuse:refresh-model-catalog", async (event) => {
+    assertSender(event);
+    await modelCatalog.refresh();
+    return publicSnapshot();
+  });
+  ipcMain.handle("openuse:reset-usage", async (event) => {
+    assertSender(event);
+    await usage.reset();
+    return publicSnapshot();
   });
   ipcMain.handle("openuse:self-test", async (event) => {
     assertSender(event);
@@ -95,6 +155,7 @@ function installIpc(): void {
   });
   ipcMain.handle("openuse:stop-task", async (event) => {
     assertSender(event);
+    cursorOverlay?.hide();
     await runtime.stop();
   });
   ipcMain.handle("openuse:permission-decision", async (event, raw: unknown) => {
@@ -113,9 +174,11 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1320,
     height: 860,
-    minWidth: 960,
-    minHeight: 640,
-    backgroundColor: "#0d0f10",
+    minWidth: 480,
+    minHeight: 560,
+    backgroundColor: "#00000000",
+    transparent: true,
+    ...(process.platform === "darwin" ? { vibrancy: "under-window", visualEffectState: "active" } : {}),
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -123,11 +186,26 @@ function createWindow(): void {
       sandbox: true,
     },
   });
+  if (process.platform === "win32") {
+    try {
+      (mainWindow as BrowserWindow & { setBackgroundMaterial?: (material: "none" | "mica" | "acrylic" | "tabbed") => void }).setBackgroundMaterial?.("acrylic");
+    } catch {
+      // Older Windows composition falls back to the CSS material layer.
+    }
+  }
   mainWindow.once("ready-to-show", () => focusMainWindow());
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) void mainWindow.loadURL(devUrl);
   else void mainWindow.loadFile(join(__dirname, "renderer", "index.html"));
-  mainWindow.on("closed", () => { mainWindow = undefined; });
+  mainWindow.on("closed", () => { mainWindow = undefined; cursorOverlay?.dispose(); cursorOverlay = undefined; });
+  createCursorOverlay();
+}
+
+function createCursorOverlay(): void {
+  if (cursorOverlay) return;
+  cursorOverlay = new CursorOverlayManager({ rendererDirectory: join(__dirname, "renderer"), devServerUrl: process.env.VITE_DEV_SERVER_URL });
+  cursorOverlay.create();
+  cursorOverlay.setAppearance({ color: settings.persisted.primaryColor, enabled: settings.persisted.showAgentCursor });
 }
 
 function focusMainWindow(): void {
@@ -142,6 +220,10 @@ async function bootstrap(): Promise<void> {
   settings = new SettingsStore(join(app.getPath("userData"), "settings.json"));
   await settings.initialize();
   secrets = new GatewaySecretStore(join(app.getPath("userData"), "secrets.json"), safeStorage);
+  modelCatalog = new ModelCatalogStore(join(app.getPath("userData"), "model-catalog.json"));
+  await modelCatalog.initialize();
+  usage = new UsageStore(join(app.getPath("userData"), "usage.json"));
+  await usage.initialize();
   qualification = new QualificationRecorder({
     enabled: process.env.OPENUSE_QUALIFICATION_MODE === "1",
     directory: process.env.OPENUSE_QUALIFICATION_DIR,
@@ -157,12 +239,23 @@ async function bootstrap(): Promise<void> {
     settings,
     engine,
     readApiKey: () => secrets.read(),
+    readCustomApiKey: () => secrets.readCustom(),
+    getModels: () => modelCatalog.snapshot().models,
+    usage,
     emit: (event) => {
       qualification.record(event);
       logRuntimeEvent(event, !app.isPackaged);
+      if (event.type === "cursor") cursorOverlay?.show(event.interaction, event.target);
+      if (event.type === "task.finished") {
+        cursorOverlay?.hide();
+        void publicSnapshot().then((snapshot) => mainWindow?.webContents.send("openuse:snapshot", snapshot));
+      }
       mainWindow?.webContents.send("openuse:event", event);
     },
     qualificationMode: qualification.enabled,
+  });
+  modelCatalog.onChange(() => {
+    void publicSnapshot().then((snapshot) => mainWindow?.webContents.send("openuse:snapshot", snapshot));
   });
   installIpc();
   createWindow();
@@ -222,7 +315,10 @@ app.on("before-quit", (event) => {
   isQuitting = true;
   void (async () => {
     await runtime?.stop();
+    await usage?.flush();
+    cursorOverlay?.hide();
     await engine?.shutdown();
+    cursorOverlay?.dispose();
     app.quit();
   })();
 });

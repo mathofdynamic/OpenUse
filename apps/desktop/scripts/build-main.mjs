@@ -21,3 +21,14 @@ await build({
   sourcemap: true,
   outfile: "dist/preload.cjs",
 });
+
+await build({
+  entryPoints: ["src/main/overlay-preload.ts"],
+  bundle: true,
+  platform: "node",
+  format: "cjs",
+  target: "node20",
+  external: ["electron"],
+  sourcemap: true,
+  outfile: "dist/overlay-preload.cjs",
+});

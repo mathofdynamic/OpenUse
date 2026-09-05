@@ -1,13 +1,22 @@
 import react from "@vitejs/plugin-react";
+import { resolve } from "node:path";
 import { defineConfig } from "vite";
 
+const rendererRoot = resolve("src/renderer");
+
 export default defineConfig({
-  root: "src/renderer",
+  root: rendererRoot,
   base: "./",
   plugins: [react()],
   build: {
-    outDir: "../../dist/renderer",
+    outDir: resolve("dist/renderer"),
     emptyOutDir: true,
     sourcemap: true,
+    rollupOptions: {
+      input: {
+        main: resolve(rendererRoot, "index.html"),
+        overlay: resolve(rendererRoot, "overlay.html"),
+      },
+    },
   },
 });

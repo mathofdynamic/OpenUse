@@ -238,7 +238,8 @@ public sealed class WindowsComputerController
         };
         mouse_event(flags.Item1, 0, 0, 0, UIntPtr.Zero);
         mouse_event(flags.Item2, 0, 0, 0, UIntPtr.Zero);
-        return new OperationResult(true, true, null, $"Clicked {button} mouse button.", "coordinate-input");
+        var target = TargetAt(input.X.Value, input.Y.Value);
+        return new OperationResult(true, true, null, $"Clicked {button} mouse button.", "coordinate-input", null, target.Point, target.Bounds, target.Display, "virtual-screen-physical-pixels");
     }
 
     private static OperationResult ClickElement(ClickElementParams input, CancellationToken cancellationToken)
@@ -274,33 +275,35 @@ public sealed class WindowsComputerController
             throw new NativeControllerException("STALE_UI_STATE", "The semantic control is disabled or offscreen.");
         if (ElementBounds(element).Width <= 0 || ElementBounds(element).Height <= 0)
             throw new NativeControllerException("STALE_UI_STATE", "The semantic control no longer has usable bounds.");
+        var elementBounds = ElementBounds(element);
+        var target = TargetAt(elementBounds.X + elementBounds.Width / 2, elementBounds.Y + elementBounds.Height / 2);
         cancellationToken.ThrowIfCancellationRequested();
         try { element.SetFocus(); } catch { /* Some controls cannot receive focus. */ }
         if (element.TryGetCurrentPattern(InvokePattern.Pattern, out var invoke))
         {
             cancellationToken.ThrowIfCancellationRequested();
             ((InvokePattern)invoke).Invoke();
-            return new OperationResult(true, true, window, $"Invoked {ElementLabel(element)}.", "accessibility-native", targetElementId);
+            return new OperationResult(true, true, window, $"Invoked {ElementLabel(element)}.", "accessibility-native", targetElementId, target.Point, elementBounds, target.Display, "virtual-screen-physical-pixels");
         }
         if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var selection))
         {
             cancellationToken.ThrowIfCancellationRequested();
             ((SelectionItemPattern)selection).Select();
-            return new OperationResult(true, true, window, $"Selected {ElementLabel(element)}.", "accessibility-native", targetElementId);
+            return new OperationResult(true, true, window, $"Selected {ElementLabel(element)}.", "accessibility-native", targetElementId, target.Point, elementBounds, target.Display, "virtual-screen-physical-pixels");
         }
         if (element.TryGetCurrentPattern(TogglePattern.Pattern, out var toggle))
         {
             cancellationToken.ThrowIfCancellationRequested();
             ((TogglePattern)toggle).Toggle();
-            return new OperationResult(true, true, window, $"Toggled {ElementLabel(element)}.", "accessibility-native", targetElementId);
+            return new OperationResult(true, true, window, $"Toggled {ElementLabel(element)}.", "accessibility-native", targetElementId, target.Point, elementBounds, target.Display, "virtual-screen-physical-pixels");
         }
-        var bounds = ElementBounds(element);
+        var bounds = elementBounds;
         cancellationToken.ThrowIfCancellationRequested();
         MoveCursor(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);
         cancellationToken.ThrowIfCancellationRequested();
         mouse_event(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
         mouse_event(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
-        return new OperationResult(true, true, window, $"Clicked {ElementLabel(element)} by its bounds.", "element-coordinate", targetElementId);
+        return new OperationResult(true, true, window, $"Clicked {ElementLabel(element)} by its bounds.", "element-coordinate", targetElementId, target.Point, bounds, target.Display, "virtual-screen-physical-pixels");
     }
 
     private static OperationResult DoubleClick(DoubleClickParams input, CancellationToken cancellationToken)
@@ -317,7 +320,8 @@ public sealed class WindowsComputerController
         cancellationToken.ThrowIfCancellationRequested();
         mouse_event(MouseEventLeftDown, 0, 0, 0, UIntPtr.Zero);
         mouse_event(MouseEventLeftUp, 0, 0, 0, UIntPtr.Zero);
-        return new OperationResult(true, true, null, "Double-clicked the requested position.", "coordinate-input");
+        var target = TargetAt(input.X.Value, input.Y.Value);
+        return new OperationResult(true, true, null, "Double-clicked the requested position.", "coordinate-input", null, target.Point, target.Bounds, target.Display, "virtual-screen-physical-pixels");
     }
 
     private static OperationResult TypeText(TypeTextParams input, CancellationToken cancellationToken)
@@ -349,12 +353,16 @@ public sealed class WindowsComputerController
         try { focused = AutomationElement.FocusedElement; }
         catch { throw new NativeControllerException("UNSUPPORTED_ACTION", "OpenUse could not safely inspect the focused control before typing."); }
         EnsureNotCredentialElement(focused);
+        var targetBounds = target is not null ? ElementBounds(target) : focused is not null ? ElementBounds(focused) : new Bounds(0, 0, 0, 0);
+        var targetPoint = targetBounds.Width > 0 && targetBounds.Height > 0
+            ? TargetAt(targetBounds.X + targetBounds.Width / 2, targetBounds.Y + targetBounds.Height / 2)
+            : (Point: (Point?)null, Bounds: (Bounds?)null, Display: (MonitorInfo?)null);
         if (target is not null && TrySetValue(target, input.Text))
-            return new OperationResult(true, true, null, $"Set {input.Text.Length} characters through UI Automation.", "accessibility-native", targetElementId);
+            return new OperationResult(true, true, null, $"Set {input.Text.Length} characters through UI Automation.", "accessibility-native", targetElementId, targetPoint.Point, targetBounds, targetPoint.Display, "virtual-screen-physical-pixels");
         if (target is null && focused is not null && TrySetValue(focused, input.Text))
-            return new OperationResult(true, true, null, $"Set {input.Text.Length} characters through UI Automation.", "accessibility-native", targetElementId);
+            return new OperationResult(true, true, null, $"Set {input.Text.Length} characters through UI Automation.", "accessibility-native", targetElementId, targetPoint.Point, targetBounds, targetPoint.Display, "virtual-screen-physical-pixels");
         SendUnicodeText(input.Text, cancellationToken);
-        return new OperationResult(true, true, null, $"Typed {input.Text.Length} characters.", "keyboard-input", targetElementId);
+        return new OperationResult(true, true, null, $"Typed {input.Text.Length} characters.", "keyboard-input", targetElementId, targetPoint.Point, targetBounds, targetPoint.Display, "virtual-screen-physical-pixels");
     }
 
     private static bool TrySetValue(AutomationElement element, string text)
@@ -421,6 +429,11 @@ public sealed class WindowsComputerController
         if (input.X.HasValue && input.Y.HasValue) MoveCursor(input.X.Value, input.Y.Value);
         cancellationToken.ThrowIfCancellationRequested();
         mouse_event(MouseEventWheel, 0, 0, unchecked((uint)(input.Amount.Value * 120)), UIntPtr.Zero);
+        if (input.X.HasValue && input.Y.HasValue)
+        {
+            var target = TargetAt(input.X.Value, input.Y.Value);
+            return new OperationResult(true, true, null, $"Scrolled {input.Amount} units.", "coordinate-input", null, target.Point, target.Bounds, target.Display, "virtual-screen-physical-pixels");
+        }
         return new OperationResult(true, true, null, $"Scrolled {input.Amount} units.", "coordinate-input");
     }
 
@@ -508,7 +521,8 @@ public sealed class WindowsComputerController
                 ToBounds(info.Monitor),
                 ToBounds(info.Work),
                 dpi,
-                (info.Flags & MonitorInfoPrimary) != 0));
+                (info.Flags & MonitorInfoPrimary) != 0,
+                dpi > 0 ? dpi / 96d : 1));
             return true;
         }
 
@@ -554,6 +568,13 @@ public sealed class WindowsComputerController
     }
 
     private static Bounds ToBounds(RECT rectangle) => new(rectangle.Left, rectangle.Top, rectangle.Right - rectangle.Left, rectangle.Bottom - rectangle.Top);
+
+    private static (Point Point, Bounds Bounds, MonitorInfo? Display) TargetAt(int x, int y)
+    {
+        var monitors = EnumerateMonitors();
+        var display = monitors.FirstOrDefault(monitor => x >= monitor.Bounds.X && x < monitor.Bounds.X + monitor.Bounds.Width && y >= monitor.Bounds.Y && y < monitor.Bounds.Y + monitor.Bounds.Height);
+        return (new Point(x, y), new Bounds(x, y, 1, 1), display);
+    }
 
     private static Screenshot CaptureScreen(string? windowId)
     {

@@ -72,7 +72,7 @@ console.log("\nWindows project preparation complete. Run pnpm verify:windows nex
 
 function commandOutput(command, args) {
   try {
-    return execFileSync(command, args, { cwd: repositoryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    return execFileSync(command, args, { cwd: repositoryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], ...(command.toLowerCase().endsWith(".cmd") ? { shell: true } : {}) }).trim();
   } catch {
     return undefined;
   }
@@ -85,7 +85,7 @@ function commandVersion(command, args) {
 function run(command, args) {
   console.log(`\n> ${command} ${args.join(" ")}`);
   try {
-    execFileSync(command, args, { cwd: repositoryRoot, stdio: "inherit" });
+    execFileSync(command, args, { cwd: repositoryRoot, stdio: "inherit", ...(command.toLowerCase().endsWith(".cmd") ? { shell: true } : {}) });
   } catch (error) {
     const status = error && typeof error === "object" && "status" in error ? error.status : undefined;
     console.error(`Command failed${typeof status === "number" ? ` with exit code ${status}` : ""}.`);
