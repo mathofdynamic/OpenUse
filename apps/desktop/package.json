@@ -1,6 +1,6 @@
 {
   "name": "@openuse/desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "dist/main.cjs",
@@ -13,6 +13,7 @@
     "build": "node scripts/build.mjs",
     "build:main": "node scripts/build-main.mjs",
     "package:macos": "node ../../scripts/dist-macos.mjs",
+    "package:windows": "node ../../scripts/dist-windows.mjs",
     "test:windows": "node scripts/test-windows.mjs",
     "test:macos": "node scripts/test-macos.mjs",
     "typecheck": "tsc --noEmit",

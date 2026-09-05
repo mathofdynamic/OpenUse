@@ -1,9 +1,29 @@
-export type ProviderId = "vercel-gateway";
+export type ProviderId = "vercel-gateway" | "custom-openai-compatible";
+
+export type ReasoningEffort = "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+export interface PricingTier {
+  minTokens: number;
+  maxTokens?: number;
+  perToken: number;
+}
+
+export interface ModelPricing {
+  inputPerToken?: number;
+  outputPerToken?: number;
+  cacheReadPerToken?: number;
+  cacheWritePerToken?: number;
+  inputTiers?: PricingTier[];
+  outputTiers?: PricingTier[];
+  cacheReadTiers?: PricingTier[];
+  cacheWriteTiers?: PricingTier[];
+}
 
 export interface ModelCapabilities {
   toolCalling: boolean;
   vision: boolean;
   reasoning?: boolean;
+  reasoningEfforts?: ReasoningEffort[];
 }
 
 export interface ModelDefinition {
@@ -11,6 +31,16 @@ export interface ModelDefinition {
   label: string;
   provider: ProviderId;
   capabilities: ModelCapabilities;
+  sourceProvider?: string;
+  modelType?: string;
+  description?: string;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  createdAt?: string;
+  releasedAt?: string;
+  tags?: string[];
+  modalities?: { input: string[]; output: string[] };
+  pricing?: ModelPricing;
 }
 
 export type AgentStatus = "idle" | "running" | "completed" | "stopped" | "error";
@@ -24,12 +54,30 @@ export type InteractionMethod =
   | "coordinate-input"
   | "keyboard-input";
 
+export type CursorInteraction = "move" | "click" | "double-click" | "drag" | "scroll" | "typing" | "waiting";
+
+export interface TargetPoint {
+  x: number;
+  y: number;
+}
+
+export interface CursorTarget {
+  point: TargetPoint;
+  bounds?: QualificationBounds;
+  display?: MonitorDiagnostics;
+  coordinateSystem: string;
+}
+
 export interface ActionTelemetry {
   interactionMethod?: InteractionMethod;
   targetApp?: string;
   targetWindowId?: string;
   targetWindowTitle?: string;
   targetElementId?: string;
+  targetPoint?: TargetPoint;
+  targetBounds?: QualificationBounds;
+  display?: MonitorDiagnostics;
+  coordinateSystem?: string;
   retryCount: number;
 }
 
@@ -178,12 +226,63 @@ export interface AppSettings {
   modelId: string;
   apiKeyConfigured: boolean;
   permissions: PermissionRecord[];
+  reasoningEffort: ReasoningEffort;
+  primaryColor: string;
+  backgroundBlur: number;
+  backgroundOpacity: number;
+  showAgentCursor: boolean;
+  customProvider: CustomProviderSettings;
+}
+
+export interface CustomProviderSettings {
+  baseUrl: string;
+  modelId: string;
+  apiKeyConfigured: boolean;
+  capabilities: ModelCapabilities;
+}
+
+export type ModelCatalogSource = "gateway-live" | "gateway-cache" | "bundled-fallback";
+
+export interface ModelCatalogStatus {
+  source: ModelCatalogSource;
+  fetchedAt?: string;
+  isRefreshing: boolean;
+  error?: string;
+  count: number;
+}
+
+export interface UsageModelSummary {
+  modelId: string;
+  provider: ProviderId;
+  requestCount: number;
+  taskCount: number;
+  knownSpend: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface UsageSummary {
+  totalKnownSpend: number;
+  totalTasks: number;
+  completedTasks: number;
+  inputTokens: number;
+  outputTokens: number;
+  knownCostRequests: number;
+  unpricedRequests: number;
+  averageTaskCost?: number;
+  modelUsage: UsageModelSummary[];
+  lastUpdatedAt?: string;
 }
 
 export interface AppSnapshot {
   settings: AppSettings;
   engine: EngineStatus;
   qualification: QualificationSessionInfo;
+  modelCatalog: {
+    models: ModelDefinition[];
+    status: ModelCatalogStatus;
+  };
+  usage: UsageSummary;
 }
 
 export interface TimelineAction {
@@ -202,6 +301,10 @@ export interface TimelineAction {
   targetWindowId?: string;
   targetWindowTitle?: string;
   targetElementId?: string;
+  targetPoint?: TargetPoint;
+  targetBounds?: QualificationBounds;
+  display?: MonitorDiagnostics;
+  coordinateSystem?: string;
   retryCount?: number;
 }
 
@@ -246,9 +349,22 @@ export type RuntimeEvent =
       taskId: string;
       step: number;
       modelId: string;
+      provider: ProviderId;
       inputTokens?: number;
       outputTokens?: number;
       totalTokens?: number;
+      reasoningEffort: ReasoningEffort;
+      actualCost?: number;
+      costSource: "gateway" | "estimated" | "unknown";
+      taskCost: number;
+      lifetimeSpend: number;
+      at: string;
+    }
+  | {
+      type: "cursor";
+      taskId: string;
+      interaction: CursorInteraction;
+      target?: CursorTarget;
       at: string;
     }
   | {
