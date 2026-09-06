@@ -51,4 +51,4 @@ Native action results may include `targetPoint`, `targetBounds`, `display`, and 
 
 ## Appearance layer
 
-macOS uses a transparent BrowserWindow with `under-window` vibrancy. Windows uses a non-layered BrowserWindow with Electron's native Acrylic material and a native rounded shape, which keeps the DWM backdrop inside the same boundary as the rendered surface. Older Windows versions fall back to a neutral dark material. The renderer applies the user-selected opacity to its material layer only, so text and controls remain crisp.
+macOS uses a transparent BrowserWindow with `under-window` vibrancy. Windows uses a non-layered BrowserWindow with Electron's native Acrylic material and `roundedCorners: true`, which lets DWM keep the backdrop and visible window boundary in one compositor-owned geometry. Older Windows versions fall back to a neutral dark material. The renderer applies the user-selected opacity to its material layer only, so text and controls remain crisp.

@@ -1,5 +1,4 @@
 import { app, BrowserWindow, ipcMain, Menu, safeStorage, shell } from "electron";
-import { roundedWindowShape } from "./window-shape";
 import type { MenuItemConstructorOptions } from "electron";
 import { join } from "node:path";
 import { z } from "zod";
@@ -266,6 +265,7 @@ function createWindow(): void {
     autoHideMenuBar: process.platform === "win32",
     backgroundColor: "#00000000",
     transparent: false,
+    roundedCorners: true,
     ...(process.platform === "darwin" ? { vibrancy: "under-window", visualEffectState: "active" } : {}),
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
@@ -275,16 +275,7 @@ function createWindow(): void {
     },
   });
   if (process.platform === "win32") {
-    const updateNativeShape = (): void => {
-      if (!mainWindow || mainWindow.isDestroyed()) return;
-      const [width, height] = mainWindow.getSize();
-      mainWindow.setShape(roundedWindowShape(width, height));
-    };
     applyWindowsBackdropMaterial();
-    updateNativeShape();
-    mainWindow.on("resize", updateNativeShape);
-    mainWindow.on("show", updateNativeShape);
-    mainWindow.on("move", updateNativeShape);
   }
   mainWindow.once("ready-to-show", () => focusMainWindow());
   const publishWindowState = (): void => {

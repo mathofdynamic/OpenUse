@@ -20,7 +20,7 @@ Primary foreground is selected from contrast against the user color. The primary
 
 ## Material
 
-The BrowserWindow uses the platform compositor where it is reliable. macOS requests transparent under-window vibrancy. Windows uses a non-layered BrowserWindow with Electron Acrylic and a native rounded shape, so the system backdrop and visible window boundary agree. The renderer controls material opacity from 45% to 100% and keeps content crisp. Older Windows versions use a neutral dark surface; the blur slider remains a visual treatment control where the platform exposes a backdrop radius.
+The BrowserWindow uses the platform compositor where it is reliable. macOS requests transparent under-window vibrancy. Windows uses a non-layered BrowserWindow with Electron Acrylic and `roundedCorners: true`, so the system backdrop and visible window boundary share the compositor's geometry. The renderer controls material opacity from 45% to 100% and keeps content crisp. Older Windows versions use a neutral dark surface; the blur slider remains a visual treatment control where the platform exposes a backdrop radius.
 
 ## Responsive states
 
