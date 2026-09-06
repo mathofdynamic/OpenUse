@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu, safeStorage, shell } from "electron";
+import { roundedWindowShape } from "./window-shape";
 import type { MenuItemConstructorOptions } from "electron";
 import { join } from "node:path";
 import { z } from "zod";
@@ -273,11 +274,22 @@ function createWindow(): void {
     },
   });
   if (process.platform === "win32") {
+    const updateNativeShape = (): void => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      const [width, height] = mainWindow.getSize();
+      mainWindow.setShape(roundedWindowShape(width, height));
+    };
     try {
-      (mainWindow as BrowserWindow & { setBackgroundMaterial?: (material: "none" | "mica" | "acrylic" | "tabbed") => void }).setBackgroundMaterial?.("acrylic");
+      // DWM Acrylic paints a rectangular backdrop beyond transparent/shaped corners.
+      // Keep the native canvas clear so the renderer owns the complete silhouette.
+      mainWindow.setBackgroundMaterial("none");
     } catch {
       // Older Windows composition falls back to the CSS material layer.
     }
+    updateNativeShape();
+    mainWindow.on("resize", updateNativeShape);
+    mainWindow.on("show", updateNativeShape);
+    mainWindow.on("move", updateNativeShape);
   }
   mainWindow.once("ready-to-show", () => focusMainWindow());
   const publishWindowState = (): void => {
