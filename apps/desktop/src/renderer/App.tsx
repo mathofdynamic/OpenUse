@@ -350,8 +350,8 @@ export function App() {
 
           <div className="workspace-grid">
             <section className="activity-surface" aria-labelledby="activity-heading">
-              <div className="surface-header"><div><div className="surface-kicker">{t("Current task")}</div><h2 id="activity-heading">{t("Activity")}</h2></div><div className={`state-badge state-${status}`}><span className="state-pulse" />{statusLabel(locale, status)}</div></div>
-              <div className="timeline" aria-live="polite">{entries.length === 0 ? <EmptyActivity commands={starterCommandList} onStarter={useStarter} /> : entries.map((entry) => entry.kind === "user" ? <UserEntry key={entry.id} command={entry.command} /> : <ActionEntry key={entry.action.actionId} action={entry.action} />)}</div>
+              <div className="surface-header"><h2 id="activity-heading">{t("Activity")}</h2><div className={`state-badge state-${status}`}><span className="state-pulse" />{statusLabel(locale, status)}</div></div>
+              <div className={`timeline ${entries.length === 0 ? "timeline-empty" : ""}`} aria-live="polite">{entries.length === 0 ? <EmptyActivity commands={starterCommandList} onStarter={useStarter} /> : entries.map((entry) => entry.kind === "user" ? <UserEntry key={entry.id} command={entry.command} /> : <ActionEntry key={entry.action.actionId} action={entry.action} />)}</div>
               <div className="activity-footer">
                 <div className="activity-metrics"><span>{isRunning ? <><span className="spinner" />{t("Step {step} / {actions} actions", { step: step || 1, actions: actionCount })}</> : t("{count} actions", { count: actionCount })}</span><span>{t("Task spend")} <strong>{formatMoney(locale, taskCost)}</strong></span><span>{t("20-step estimate")} <Estimate model={activeModel} usage={usage} /></span></div>
                 <div className="composer"><textarea ref={composerRef} value={command} onChange={(event) => setCommand(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void runTask(); }} placeholder={t("Tell OpenUse what to do...")} aria-label={t("Task command")} rows={2} disabled={isRunning} /><div className="composer-bottom"><span className="composer-hint">{t("Ctrl + Enter to run")}</span>{isRunning ? <button className="stop-button" type="button" onClick={() => void stopTask()}><span className="stop-square" />{t("Stop task")}</button> : <button className="run-button" type="button" disabled={!command.trim()} onClick={() => void runTask()}><span>{t("Run task")}</span><Glyph name="arrow" /></button>}</div></div>
@@ -379,7 +379,7 @@ function WindowTitleBar() {
 
   return <header className="window-titlebar" aria-label={t("Window controls")}>
     <div className="window-titlebar-drag" onDoubleClick={() => void runtimeApi.toggleMaximizeWindow()}>
-      <div className="window-titlebar-brand"><div className="brand-mark window-titlebar-mark" aria-hidden="true"><span /></div><div><div className="window-titlebar-name">OpenUse</div><div className="window-titlebar-caption">{t("Control room")}</div></div></div>
+      <div className="window-titlebar-brand"><div className="brand-mark window-titlebar-mark" aria-hidden="true"><span /></div><div className="window-titlebar-name">OpenUse</div></div>
     </div>
     <div className="window-controls" aria-label={t("Window controls")}>
       <button className="window-control" type="button" aria-label={t("Minimize window")} onClick={() => void runtimeApi.minimizeWindow()}><Glyph name="minus" /></button>
