@@ -161,6 +161,7 @@ function installIpc(): void {
   ipcMain.handle("openuse:set-appearance", async (event, raw: unknown) => {
     assertSender(event);
     await settings.setAppearance(appearanceSchema.parse(raw));
+    applyWindowsBackdropMaterial();
     cursorOverlay?.setAppearance({ color: settings.persisted.primaryColor, enabled: settings.persisted.showAgentCursor });
     return publicSnapshot();
   });
@@ -264,7 +265,7 @@ function createWindow(): void {
     frame: false,
     autoHideMenuBar: process.platform === "win32",
     backgroundColor: "#00000000",
-    transparent: true,
+    transparent: false,
     ...(process.platform === "darwin" ? { vibrancy: "under-window", visualEffectState: "active" } : {}),
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
@@ -279,13 +280,7 @@ function createWindow(): void {
       const [width, height] = mainWindow.getSize();
       mainWindow.setShape(roundedWindowShape(width, height));
     };
-    try {
-      // DWM Acrylic paints a rectangular backdrop beyond transparent/shaped corners.
-      // Keep the native canvas clear so the renderer owns the complete silhouette.
-      mainWindow.setBackgroundMaterial("none");
-    } catch {
-      // Older Windows composition falls back to the CSS material layer.
-    }
+    applyWindowsBackdropMaterial();
     updateNativeShape();
     mainWindow.on("resize", updateNativeShape);
     mainWindow.on("show", updateNativeShape);
@@ -303,6 +298,15 @@ function createWindow(): void {
   else void mainWindow.loadFile(join(__dirname, "renderer", "index.html"));
   mainWindow.on("closed", () => { mainWindow = undefined; cursorOverlay?.dispose(); cursorOverlay = undefined; });
   createCursorOverlay();
+}
+
+function applyWindowsBackdropMaterial(): void {
+  if (process.platform !== "win32" || !mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.setBackgroundMaterial(settings.persisted.backgroundBlur > 0 ? "acrylic" : "none");
+  } catch {
+    // Older Windows composition falls back to the renderer's neutral material.
+  }
 }
 
 function createCursorOverlay(): void {

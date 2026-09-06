@@ -20,16 +20,16 @@ Primary foreground is selected from contrast against the user color. The primary
 
 ## Material
 
-The BrowserWindow is transparent where the platform supports it. macOS requests Electron under-window vibrancy; Windows requests Acrylic through the current Electron API when available. The CSS material layer applies `backdrop-filter` blur and an adjustable neutral background alpha. Blur is configurable from 0 to 40px-equivalent and opacity from 45% to 100%. The fallback is a neutral translucent surface without requiring native composition.
+The BrowserWindow uses the platform compositor where it is reliable. macOS requests transparent under-window vibrancy. Windows uses a non-layered BrowserWindow with Electron Acrylic and a native rounded shape, so the system backdrop and visible window boundary agree. The renderer controls material opacity from 45% to 100% and keeps content crisp. Older Windows versions use a neutral dark surface; the blur slider remains a visual treatment control where the platform exposes a backdrop radius.
 
 ## Responsive states
 
 | Width/height | Layout |
 | --- | --- |
-| `≥1200px` | rail, wide Activity surface, Inspector |
-| `900–1199px` | compact rail, Activity, narrower Inspector |
-| `640–899px` | top navigation, full Activity, Inspector drawer/sheet |
-| `420–639px` | single column, sticky composer/footer, no permanent Inspector |
+| `≥1200px` | rail and wide Activity surface |
+| `900–1199px` | compact rail and Activity surface |
+| `640–899px` | top navigation and full Activity surface |
+| `420–639px` | single column with sticky composer/footer |
 | `<420px` | slimmer controls and near-full-window Settings; Electron minimum is 480px wide |
 | short height `≤640px` | independent timeline scrolling, reduced spacing, reachable composer and dialog actions |
 

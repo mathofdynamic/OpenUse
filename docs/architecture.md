@@ -51,4 +51,4 @@ Native action results may include `targetPoint`, `targetBounds`, `display`, and 
 
 ## Appearance layer
 
-The BrowserWindow is transparent where supported, with macOS `under-window` vibrancy and Windows Acrylic attempted through Electron's native API. The renderer supplies a neutral material fallback and applies the user-selected blur and background opacity to the material layer only. Text and controls remain crisp. The application does not turn the whole content tree transparent.
+macOS uses a transparent BrowserWindow with `under-window` vibrancy. Windows uses a non-layered BrowserWindow with Electron's native Acrylic material and a native rounded shape, which keeps the DWM backdrop inside the same boundary as the rendered surface. Older Windows versions fall back to a neutral dark material. The renderer applies the user-selected opacity to its material layer only, so text and controls remain crisp.
