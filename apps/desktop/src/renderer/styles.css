@@ -99,7 +99,7 @@
   --primary-muted: color-mix(in srgb, var(--primary) 14%, transparent);
   --surface-alpha: 0.78;
   --background-blur: 18px;
-  --window-radius: 14px;
+  --window-radius: 10px;
 }
 
 * { box-sizing: border-box; }
