@@ -14,14 +14,13 @@ import type {
   PermissionDecision,
   PermissionLevel,
   PermissionRequest,
-  QualificationDebugSnapshot,
   QualificationSessionInfo,
   ReasoningEffort,
   RuntimeEvent,
   TimelineAction,
   UsageSummary,
 } from "@openuse/shared";
-import { formatDuration, formatMoney, formatNumber, formatPricePerMillion, formatTimestamp, localizeRuntimeText, platformName, providerLabel, reasoningLabel, starterCommands, statusLabel, translate } from "./i18n";
+import { formatDuration, formatMoney, formatNumber, formatPricePerMillion, localizeRuntimeText, platformName, providerLabel, reasoningLabel, starterCommands, statusLabel, translate } from "./i18n";
 
 type TimelineEntry =
   | { kind: "user"; id: string; command: string }
@@ -121,11 +120,9 @@ const runtimeApi = window.openuse ?? browserPreviewBridge;
 export function App() {
   const [settings, setSettings] = useState<AppSettings>(emptySettings);
   const [engine, setEngine] = useState<EngineStatus>(emptyEngine);
-  const [qualification, setQualification] = useState<QualificationSessionInfo>(emptyQualification);
   const [models, setModels] = useState<ModelDefinition[]>(MODEL_CATALOG);
   const [catalogStatus, setCatalogStatus] = useState<ModelCatalogStatus>(emptyCatalogStatus);
   const [usage, setUsage] = useState<UsageSummary>(emptyUsage);
-  const [debugSnapshot, setDebugSnapshot] = useState<QualificationDebugSnapshot | undefined>();
   const [selfTest, setSelfTest] = useState<EngineSelfTestResult | undefined>();
   const [entries, setEntries] = useState<TimelineEntry[]>([]);
   const [command, setCommand] = useState("");
@@ -152,7 +149,6 @@ export function App() {
   function applySnapshot(snapshot: AppSnapshot) {
     setSettings(snapshot.settings);
     setEngine(snapshot.engine);
-    setQualification(snapshot.qualification);
     setSelfTest(snapshot.qualification.selfTest);
     setModels(snapshot.modelCatalog.models);
     setCatalogStatus(snapshot.modelCatalog.status);
@@ -171,8 +167,6 @@ export function App() {
       setPermission,
       setEngine,
       setError,
-      setQualification,
-      setDebugSnapshot,
       setSelfTest,
     }));
     const unsubscribeSnapshot = runtimeApi.onSnapshot(applySnapshot);
@@ -358,7 +352,6 @@ export function App() {
               </div>
             </section>
 
-            <Inspector engine={engine} model={activeModel} status={status} controlReady={controlReady} platformLabel={platformLabel} taskCost={taskCost} totalSpend={usage.totalKnownSpend} onSettings={() => setSettingsOpen(true)} qualification={qualification} debug={debugSnapshot} selfTest={selfTest} />
           </div>
         </div>
       </main>
@@ -399,8 +392,6 @@ function handleRuntimeEvent(event: RuntimeEvent, setters: {
   setPermission: Dispatch<SetStateAction<PermissionRequest | undefined>>;
   setEngine: Dispatch<SetStateAction<EngineStatus>>;
   setError: Dispatch<SetStateAction<string | undefined>>;
-  setQualification: Dispatch<SetStateAction<QualificationSessionInfo>>;
-  setDebugSnapshot: Dispatch<SetStateAction<QualificationDebugSnapshot | undefined>>;
   setSelfTest: Dispatch<SetStateAction<EngineSelfTestResult | undefined>>;
 }) {
   switch (event.type) {
@@ -419,25 +410,11 @@ function handleRuntimeEvent(event: RuntimeEvent, setters: {
     case "action.failed": setters.setEntries((current) => current.map((entry) => entry.kind === "action" && entry.action.actionId === event.actionId ? { ...entry, action: { ...entry.action, status: "failed", durationMs: event.durationMs, errorCode: event.code, errorMessage: event.message, ...event.telemetry } } : entry)); break;
     case "task.finished": setters.setStatus(event.status); if (event.status === "error") setters.setError(event.summary); break;
     case "engine.status": setters.setEngine(event.status); break;
-    case "qualification.debug": setters.setDebugSnapshot(event.debug); break;
     case "qualification.self-test": setters.setSelfTest(event.result); break;
   }
 }
 
 function BrandLockup() { const { t } = useTranslation(); return <div className="brand-lockup"><div className="brand-mark" aria-hidden="true"><span /></div><div><div className="brand-name">OpenUse</div><div className="brand-caption">{t("computer runtime")}</div></div></div>; }
-
-function Inspector({ engine, model, status, controlReady, platformLabel, taskCost, totalSpend, onSettings, qualification, debug, selfTest }: { engine: EngineStatus; model: ModelDefinition; status: AgentStatus; controlReady: boolean; platformLabel: string; taskCost: number; totalSpend: number; onSettings(): void; qualification: QualificationSessionInfo; debug?: QualificationDebugSnapshot; selfTest?: EngineSelfTestResult }) {
-  const { locale, t } = useTranslation();
-  const compatibilityIssues = getCompatibilityIssues(model);
-  const content = <>
-    <section className="inspector-section engine-section"><div className="section-heading"><span className="section-icon"><Glyph name="desktop" /></span><span>{t("Computer state")}</span></div><div className="engine-title"><span className={`large-status-dot ${controlReady ? "status-ready" : `status-${engine.state}`}`} />{controlReady ? t("{platform} desktop", { platform: platformLabel }) : t("{platform} control", { platform: platformLabel })}</div><p className="engine-copy">{controlReady ? t("Actions stay local. Native accessibility is preferred; screenshots are used only when needed.") : localizeRuntimeText(locale, engine.detail)}</p><div className="engine-rule" /><div className="engine-foot"><span>{t("Protocol")}</span><strong className="technical">JSON-lines / stdio</strong></div></section>
-    <section className="inspector-section usage-section"><div className="section-heading"><span className="section-icon"><Glyph name="chart" /></span><span>{t("Usage")}</span></div><div className="usage-emphasis">{formatMoney(locale, taskCost)}</div><div className="usage-label">{t("This task")}</div><div className="usage-row"><span>{t("OpenUse total")}</span><strong>{formatMoney(locale, totalSpend)}</strong></div><button className="text-button" type="button" disabled={status === "running"} onClick={onSettings}>{t("View usage")} <Glyph name="arrow" /></button></section>
-    <section className="inspector-section model-section"><div className="section-heading"><span className="section-icon"><Glyph name="spark" /></span><span>{t("Model")}</span></div><div className="model-detail-name">{model.label}</div><div className="model-detail-id technical">{model.id}</div><div className={`model-compatibility ${compatibilityIssues.length === 0 ? "compatible" : "incompatible"}`}>{compatibilityIssues.length === 0 ? t("Ready for Computer Use") : compatibilityIssues.map((issue) => localizeRuntimeText(locale, issue)).join(" ")}</div><div className="capability-checks"><span className={model.capabilities.toolCalling ? "" : "capability-missing"}><Glyph name={model.capabilities.toolCalling ? "check" : "alert"} />{t("Tool calling")}</span><span className={model.capabilities.vision ? "" : "capability-missing"}><Glyph name={model.capabilities.vision ? "check" : "alert"} />{t("Vision")}</span></div></section>
-    <section className="inspector-section safety-section"><div className="section-heading"><span className="section-icon"><Glyph name="shield" /></span><span>{t("Safety posture")}</span></div><ul className="safety-list"><li><Glyph name="check" /><span>{t("Semantic UI before coordinates")}</span></li><li><Glyph name="check" /><span>{t("App permissions on every control path")}</span></li><li><Glyph name="check" /><span>{t("Stop cancels model and native work")}</span></li></ul><button className="text-button" type="button" disabled={status === "running"} onClick={onSettings}>{t("Review permissions")} <Glyph name="arrow" /></button></section>
-    {qualification.enabled && <QualificationPanel engine={engine} debug={debug} selfTest={selfTest} />}
-  </>;
-  return <><aside className="inspector-column" aria-label={t("Runtime details")}>{content}</aside><details className="inspector-drawer"><summary>{t("Runtime details")} <Glyph name="chevron" /></summary><div className="drawer-content">{content}</div></details></>;
-}
 
 function MacPermissionSetup({ selfTest }: { selfTest: EngineSelfTestResult }) {
   const { locale, t } = useTranslation();
@@ -583,20 +560,6 @@ function Estimate({ model, usage }: { model: ModelDefinition; usage: UsageSummar
 function profileFromUsage(model: ModelDefinition, usage: UsageSummary) { const own = usage.modelUsage.find((item) => item.modelId === model.id); const source = own ?? (usage.modelUsage.length > 0 ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, requestCount: usage.modelUsage.reduce((sum, item) => sum + item.requestCount, 0) } : undefined); return source && source.requestCount > 0 ? { inputTokensPerStep: source.inputTokens / source.requestCount, outputTokensPerStep: source.outputTokens / source.requestCount, source: own ? "model" as const : "general" as const } : undefined; }
 function catalogAgeLabel(models: ModelDefinition[], locale: Locale): string { const model = models.find((item) => item.createdAt || item.releasedAt); return model?.releasedAt ? translate(locale, "dated") : translate(locale, "local"); }
 function formatModelPrice(direct: number | undefined, tiers: Array<{ perToken: number }> | undefined, locale: Locale): string { const price = direct ?? tiers?.[0]?.perToken; const prefix = tiers && direct === undefined ? translate(locale, "from") + " " : ""; return `${prefix}${formatPricePerMillion(locale, price)}`; }
-
-function QualificationPanel({ engine, debug, selfTest }: { engine: EngineStatus; debug?: QualificationDebugSnapshot; selfTest?: EngineSelfTestResult }) {
-  const { locale, t } = useTranslation();
-  const platformLabel = platformName(locale, engine.platform);
-  const stateLabel = engine.state === "ready" ? t("Connected") : engine.state === "offline" ? t("Offline") : t(engine.state);
-  return <section className="inspector-section qualification-section">
-    <div className="section-heading"><span className="section-icon"><Glyph name="tool" /></span><span>{t("Qualification mode")}</span></div>
-    <div className="qualification-status"><span className={"status-dot status-" + engine.state} />{t("{platform} controller", { platform: platformLabel })} <strong>{stateLabel}</strong></div>
-    <div className="qualification-grid"><span>{t("PID")}</span><strong className="technical">{engine.pid ?? "-"}</strong><span>{t("Protocol")}</span><strong className="technical">{engine.protocol ?? "-"}</strong><span>{t("Heartbeat")}</span><strong className="technical">{engine.lastHeartbeatAt ? formatTimestamp(locale, engine.lastHeartbeatAt) : "-"}</strong><span>{t("Last action")}</span><strong>{localizeRuntimeText(locale, engine.lastAction) ?? "-"}</strong></div>
-    {selfTest && <><div className={"self-test-result " + (selfTest.ok ? "self-test-pass" : "self-test-fail")}><span>{selfTest.ok ? t("Self-test passed") : t("Self-test failed")}</span><span>{formatNumber(locale, selfTest.monitorCount)} {t(selfTest.monitorCount === 1 ? "monitor" : "monitors")}</span></div><div className="self-test-details">{selfTest.accessibilityPermission && <span>{t("Accessibility")}: {t(selfTest.accessibilityPermission === "granted" ? "Granted" : selfTest.accessibilityPermission === "denied" ? "Not granted" : "Unknown")}</span>}{selfTest.screenRecordingPermission && <span>{t("Screen Recording")}: {t(selfTest.screenRecordingPermission === "granted" ? "Granted" : selfTest.screenRecordingPermission === "denied" ? "Not granted" : "Unknown")}</span>}{selfTest.monitors.map((monitor) => <span key={monitor.index}>{t("Display")} {formatNumber(locale, monitor.index + 1)}: {formatNumber(locale, monitor.dpi)} DPI / {monitor.scaleFactor ?? 1}x / {monitor.bounds.width}x{monitor.bounds.height}</span>)}{selfTest.screenshot && <span>{t("Capture")}: {selfTest.screenshot.width}x{selfTest.screenshot.height} / {t("origin")} ({selfTest.screenshot.captureBounds.x}, {selfTest.screenshot.captureBounds.y})</span>}</div></>}
-    {debug && <><div className="debug-rule" /><div className="debug-label">{t("Last runtime observation")}</div><div className="debug-summary"><strong className="technical">{debug.tool}</strong><span>{t("{result} / action {actionCount} / retry {retryCount}", { result: t(debug.result), actionCount: formatNumber(locale, debug.actionCount), retry: formatNumber(locale, debug.retryCount) })}</span></div><div className="debug-summary"><span>{t("Method")}</span><strong className="technical">{debug.interactionMethod ?? t("not an interaction")}</strong></div>{debug.targetElementId && <div className="debug-summary"><span>{t("Element")}</span><strong className="technical">{debug.targetElementId}</strong></div>}{debug.window && <div className="debug-window"><strong>{debug.window.title || debug.window.app}</strong><span className="technical">{debug.window.app} / {debug.window.bounds.width}x{debug.window.bounds.height} at ({debug.window.bounds.x}, {debug.window.bounds.y})</span></div>}{debug.screenshot && <div className="debug-window"><strong>{t("Screenshot")}</strong><span className="technical">{debug.screenshot.width}x{debug.screenshot.height} px / {t("origin")} ({debug.screenshot.originX}, {debug.screenshot.originY})</span></div>}<div className="debug-label">{t("Normalized elements ({count})", { count: formatNumber(locale, debug.elements.length) })}{debug.truncated ? "+" : ""}</div><div className="debug-elements" role="region" aria-label={t("Normalized UI Automation elements")}>{debug.elements.slice(0, 40).map((element) => <div className="debug-element" key={element.id}><strong className="technical">{element.id}</strong><span>{element.role} / {element.name || t("(unnamed)")}</span><small className="technical">{element.automationId || element.className || "-"} / {element.bounds.x},{element.bounds.y} {element.bounds.width}x{element.bounds.height}</small></div>)}</div></>}
-    {!debug && <p className="qualification-note">{t("Start a task to inspect normalized UI state and actual interaction method here. Pixels are never persisted by default.")}</p>}
-  </section>;
-}
 
 function primaryForeground(hex: string): string { const value = hex.replace("#", ""); if (value.length !== 6) return "#0a0a0a"; const channels = [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16) / 255).map((channel) => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4); const luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]; return luminance > 0.52 ? "#0a0a0a" : "#ffffff"; }
 type ConnectionTestState = "idle" | "testing" | GatewayConnectionResult;
