@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, Dispatch, SetStateAction } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
+import type { CSSProperties, Dispatch, KeyboardEvent as ReactKeyboardEvent, SetStateAction } from "react";
 import { MODEL_CATALOG, estimateTwentyStepCost, getCompatibilityIssues, type GatewayConnectionResult } from "@openuse/ai";
 import { defaultPermissionRecords } from "@openuse/permissions";
 import type {
@@ -506,7 +506,7 @@ function CustomProviderSettings({ baseUrl, setBaseUrl, modelId, setModelId, capa
 
 function ReasoningSettings({ model, value, onReasoning }: { model?: ModelDefinition; value: ReasoningEffort; onReasoning(value: ReasoningEffort): void }) { const { t } = useTranslation(); return <div className="settings-field"><label>{t("Reasoning level")}</label><ReasoningSelect model={model} value={value} onChange={onReasoning} /><div className="field-note">{t("Only levels advertised by the selected model are sent. Unsupported choices fall back to Provider default.")}</div></div>; }
 
-function AppearanceSettings({ settings, onAppearance, onLocale }: { settings: AppSettings; onAppearance(patch: { primaryColor?: string; backgroundBlur?: number; backgroundOpacity?: number; showAgentCursor?: boolean }): void; onLocale(locale: Locale): void }) { const { t } = useTranslation(); const presets = ["#c8f36a", "#8bd5ff", "#ffb86b", "#d9a7ff", "#f3f3f3"]; return <div className="settings-section"><div className="dialog-eyebrow">{t("Appearance")}</div><h3>{t("One signal color. A window that recedes.")}</h3><p className="settings-lede">{t("OpenUse uses black, white, and one selected primary. The native material lets the desktop remain present while controls stay crisp.")}</p><div className="settings-field"><label htmlFor="locale-select">{t("Language")}</label><div className="select-wrap language-select"><select id="locale-select" value={settings.locale} onChange={(event) => onLocale(event.target.value as Locale)}><option value="en">{t("English")}</option><option value="fa">{t("Persian")}</option></select><Glyph name="chevron" /></div><div className="field-note">{t("Language changes apply immediately to the whole interface.")}</div></div><div className="settings-field"><label>{t("Primary color")}</label><div className="color-presets">{presets.map((color) => <button key={color} className={`color-swatch ${settings.primaryColor === color ? "color-swatch-selected" : ""}`} style={{ backgroundColor: color }} type="button" aria-label={t("Use {color}", { color })} onClick={() => onAppearance({ primaryColor: color })}><span /></button>)}<input className="color-picker" type="color" value={settings.primaryColor} onChange={(event) => onAppearance({ primaryColor: event.target.value })} aria-label={t("Custom primary color")} /></div><div className="hex-input" dir="ltr"><span>#</span><input aria-label={`${t("Primary color")} HEX`} value={settings.primaryColor.replace(/^#/, "")} maxLength={6} onChange={(event) => { const value = event.target.value.replace(/[^0-9a-f]/gi, "").slice(0, 6); if (value.length === 6) onAppearance({ primaryColor: `#${value}` }); }} /><span className="color-preview" style={{ backgroundColor: settings.primaryColor }} /></div></div><RangeField id="background-blur" label={t("Background blur")} value={settings.backgroundBlur} min={0} max={40} step={1} suffix="px" onChange={(value) => onAppearance({ backgroundBlur: value })} /><RangeField id="background-opacity" label={t("Background opacity")} value={Math.round(settings.backgroundOpacity * 100)} min={45} max={100} step={1} suffix="%" onChange={(value) => onAppearance({ backgroundOpacity: value / 100 })} /><label className="toggle-row"><span><strong>{t("Show OpenUse cursor")}</strong><small>{t("Show the virtual target overlay while the agent acts.")}</small></span><input type="checkbox" checked={settings.showAgentCursor} onChange={(event) => onAppearance({ showAgentCursor: event.target.checked })} /><span className="toggle-control" /></label></div>; }
+function AppearanceSettings({ settings, onAppearance, onLocale }: { settings: AppSettings; onAppearance(patch: { primaryColor?: string; backgroundBlur?: number; backgroundOpacity?: number; showAgentCursor?: boolean }): void; onLocale(locale: Locale): void }) { const { t } = useTranslation(); const presets = ["#c8f36a", "#8bd5ff", "#ffb86b", "#d9a7ff", "#f3f3f3"]; return <div className="settings-section"><div className="dialog-eyebrow">{t("Appearance")}</div><h3>{t("One signal color. A window that recedes.")}</h3><p className="settings-lede">{t("OpenUse uses black, white, and one selected primary. The native material lets the desktop remain present while controls stay crisp.")}</p><div className="settings-field"><label htmlFor="locale-select">{t("Language")}</label><ThemedSelect id="locale-select" className="language-select" value={settings.locale} options={[{ value: "en", label: t("English") }, { value: "fa", label: t("Persian") }]} ariaLabel={t("Language")} onChange={(value) => onLocale(value as Locale)} /><div className="field-note">{t("Language changes apply immediately to the whole interface.")}</div></div><div className="settings-field"><label>{t("Primary color")}</label><div className="color-presets">{presets.map((color) => <button key={color} className={`color-swatch ${settings.primaryColor === color ? "color-swatch-selected" : ""}`} style={{ backgroundColor: color }} type="button" aria-label={t("Use {color}", { color })} onClick={() => onAppearance({ primaryColor: color })}><span /></button>)}<input className="color-picker" type="color" value={settings.primaryColor} onChange={(event) => onAppearance({ primaryColor: event.target.value })} aria-label={t("Custom primary color")} /></div><div className="hex-input" dir="ltr"><span>#</span><input aria-label={`${t("Primary color")} HEX`} value={settings.primaryColor.replace(/^#/, "")} maxLength={6} onChange={(event) => { const value = event.target.value.replace(/[^0-9a-f]/gi, "").slice(0, 6); if (value.length === 6) onAppearance({ primaryColor: `#${value}` }); }} /><span className="color-preview" style={{ backgroundColor: settings.primaryColor }} /></div></div><RangeField id="background-blur" label={t("Background blur")} value={settings.backgroundBlur} min={0} max={40} step={1} suffix="px" onChange={(value) => onAppearance({ backgroundBlur: value })} /><RangeField id="background-opacity" label={t("Background opacity")} value={Math.round(settings.backgroundOpacity * 100)} min={45} max={100} step={1} suffix="%" onChange={(value) => onAppearance({ backgroundOpacity: value / 100 })} /><label className="toggle-row"><span><strong>{t("Show OpenUse cursor")}</strong><small>{t("Show the virtual target overlay while the agent acts.")}</small></span><input type="checkbox" checked={settings.showAgentCursor} onChange={(event) => onAppearance({ showAgentCursor: event.target.checked })} /><span className="toggle-control" /></label></div>; }
 
 function RangeField({ id, label, value, min, max, step, suffix, onChange }: { id: string; label: string; value: number; min: number; max: number; step: number; suffix: string; onChange(value: number): void }) { const { locale } = useTranslation(); const localizedSuffix = locale === "fa" ? (suffix === "px" ? " پیکسل" : "٪") : suffix; return <div className="settings-field range-field"><div className="field-label-row"><label htmlFor={id}>{label}</label><output htmlFor={id}>{formatNumber(locale, value)}{localizedSuffix}</output></div><input id={id} type="range" value={value} min={min} max={max} step={step} onChange={(event) => onChange(Number(event.target.value))} /></div>; }
 
@@ -514,7 +514,7 @@ function UsageSettings({ usage, onReset }: { usage: UsageSummary; onReset(): voi
 
 function Metric({ label, value }: { label: string; value: string }) { return <div className="metric"><span>{label}</span><strong>{value}</strong></div>; }
 
-function PermissionsSettings({ settings, onPermissionChange }: { settings: AppSettings; onPermissionChange(appName: string, level: PermissionLevel, appIdentity?: string): void }) { const { t } = useTranslation(); return <div className="settings-section"><div className="dialog-eyebrow">{t("Permissions")}</div><h3>{t("Who can OpenUse control?")}</h3><p className="settings-lede">{t("App permissions apply to semantic actions, coordinate fallback, screenshots, and keyboard input. Safety risk still determines whether a confirmation is required.")}</p><div className="permission-list">{settings.permissions.map((record) => <div className="permission-row" key={record.appIdentity ?? record.appName}><div><div className="permission-app">{record.appName}</div><div className="permission-updated">{record.level === "ALLOW" ? t("Control allowed") : record.level === "DENY" ? t("Control blocked") : t("Ask each time")}</div></div><div className="select-wrap permission-select"><select aria-label={`${record.appName} ${t("permission")}`} value={record.level} onChange={(event) => onPermissionChange(record.appName, event.target.value as PermissionLevel, record.appIdentity)}><option>ALLOW</option><option>ASK</option><option>DENY</option></select><Glyph name="chevron" /></div></div>)}</div></div>; }
+function PermissionsSettings({ settings, onPermissionChange }: { settings: AppSettings; onPermissionChange(appName: string, level: PermissionLevel, appIdentity?: string): void }) { const { t } = useTranslation(); return <div className="settings-section"><div className="dialog-eyebrow">{t("Permissions")}</div><h3>{t("Who can OpenUse control?")}</h3><p className="settings-lede">{t("App permissions apply to semantic actions, coordinate fallback, screenshots, and keyboard input. Safety risk still determines whether a confirmation is required.")}</p><div className="permission-list">{settings.permissions.map((record) => <div className="permission-row" key={record.appIdentity ?? record.appName}><div><div className="permission-app">{record.appName}</div><div className="permission-updated">{record.level === "ALLOW" ? t("Control allowed") : record.level === "DENY" ? t("Control blocked") : t("Ask each time")}</div></div><ThemedSelect className="permission-select" value={record.level} options={[{ value: "ALLOW", label: "ALLOW" }, { value: "ASK", label: "ASK" }, { value: "DENY", label: "DENY" }]} ariaLabel={`${record.appName} ${t("permission")}`} onChange={(value) => onPermissionChange(record.appName, value as PermissionLevel, record.appIdentity)} /></div>)}</div></div>; }
 
 function AdvancedSettings({ settings, catalogStatus, onRunSelfTest, onOpenMacPrivacy }: { settings: AppSettings; catalogStatus: ModelCatalogStatus; onRunSelfTest(): void; onOpenMacPrivacy(area: "accessibility" | "screen-recording"): void }) {
   const { locale, t } = useTranslation();
@@ -548,7 +548,147 @@ function AdvancedSettings({ settings, catalogStatus, onRunSelfTest, onOpenMacPri
 
 function ModelPicker({ models, value, onSelect, compact = false, disabled = false }: { models: ModelDefinition[]; value: string; onSelect(modelId: string): void; compact?: boolean; disabled?: boolean }) { const { locale, t } = useTranslation(); const [open, setOpen] = useState(false); const [query, setQuery] = useState(""); const [showAll, setShowAll] = useState(false); const [provider, setProvider] = useState("all"); const compatibleModels = models.filter((model) => getCompatibilityIssues(model).length === 0); const source = showAll ? models : compatibleModels; const providers = [...new Set(source.map((model) => model.sourceProvider || "other"))].sort(); const filtered = source.filter((model) => (provider === "all" || (model.sourceProvider || "other") === provider) && `${model.label} ${model.id} ${model.description ?? ""}`.toLowerCase().includes(query.toLowerCase())).slice(0, 120); const selected = models.find((model) => model.id === value); return <div className={`model-picker-control ${compact ? "model-picker-compact" : ""}`}><button className="model-picker-trigger" type="button" disabled={disabled} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((current) => !current)}><span>{selected?.label ?? value}</span><small className="technical">{selected?.id ?? value}</small><Glyph name="chevron" /></button>{open && <div className="model-picker-popover"><div className="model-picker-search"><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search models or IDs")} aria-label={t("Search models")} /><button type="button" onClick={() => setShowAll((current) => !current)}>{showAll ? t("Computer Use only") : t("Show all models")}</button></div><div className="model-picker-filters"><button className={provider === "all" ? "filter-active" : ""} type="button" onClick={() => setProvider("all")}>{t("All providers")}</button>{providers.map((item) => <button className={provider === item ? "filter-active" : ""} type="button" key={item} onClick={() => setProvider(item)}>{item}</button>)}</div><div className="model-picker-list" role="listbox">{filtered.length === 0 ? <div className="empty-note">{t("No models match this search.")}</div> : filtered.map((model) => { const issues = getCompatibilityIssues(model); return <button className={`model-option ${model.id === value ? "model-option-selected" : ""}`} role="option" aria-selected={model.id === value} type="button" key={model.id} onClick={() => { onSelect(model.id); setOpen(false); }}><span className="model-option-top"><strong>{model.label}</strong><small>{model.sourceProvider || "Gateway"}</small></span><span className="model-option-id technical">{model.id}</span><span className="model-option-meta"><span className={model.capabilities.vision ? "" : "meta-missing"}>{model.capabilities.vision ? t("Vision") : t("No vision")}</span><span className={model.capabilities.toolCalling ? "" : "meta-missing"}>{model.capabilities.toolCalling ? t("Tools") : t("No tools")}</span><span>{model.capabilities.reasoning ? t("Reasoning") : t("Provider default")}</span><span>{t("Input {price}", { price: formatModelPrice(model.pricing?.inputPerToken, model.pricing?.inputTiers, locale) })}</span><span>{t("Output {price}", { price: formatModelPrice(model.pricing?.outputPerToken, model.pricing?.outputTiers, locale) })}</span></span>{showAll && issues.length > 0 && <span className="model-option-warning">{t("Unavailable for Computer Use: {reason}", { reason: issues.map((issue) => localizeRuntimeText(locale, issue)).join(" ") })}</span>}</button>; })}</div><div className="model-picker-foot">{filtered.length >= 120 ? t("Showing the first {count} matches.", { count: formatNumber(locale, 120) }) : t("{count} models", { count: formatNumber(locale, filtered.length) })} / {t("catalog {age}", { age: catalogAgeLabel(models, locale) })}</div></div>}</div>; }
 
-function ReasoningSelect({ model, value, onChange, compact = false, disabled = false }: { model?: ModelDefinition; value: ReasoningEffort; onChange(value: ReasoningEffort): void; compact?: boolean; disabled?: boolean }) { const { locale, t } = useTranslation(); const supported: ReasoningEffort[] = model?.capabilities.reasoning ? model.capabilities.reasoningEfforts ?? ["provider-default"] : ["provider-default"]; return <div className={`select-wrap reasoning-select ${compact ? "reasoning-select-compact" : ""}`}><select aria-label={t("Reasoning level")} value={supported.includes(value) ? value : "provider-default"} disabled={disabled || supported.length <= 1} onChange={(event) => onChange(event.target.value as ReasoningEffort)}>{supported.map((effort) => <option value={effort} key={effort}>{reasoningLabel(locale, effort)}</option>)}</select><Glyph name="chevron" /></div>; }
+interface ThemedSelectOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
+
+interface ThemedSelectProps {
+  id?: string;
+  value: string;
+  options: ThemedSelectOption[];
+  ariaLabel: string;
+  onChange(value: string): void;
+  className?: string;
+  disabled?: boolean;
+}
+
+function ThemedSelect({ id, value, options, ariaLabel, onChange, className = "", disabled = false }: ThemedSelectProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const selectId = useId();
+  const menuId = `themed-select-${selectId.replace(/:/g, "")}`;
+  const selectedIndex = Math.max(0, options.findIndex((option) => option.value === value && !option.disabled));
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(selectedIndex);
+  const selected = options.find((option) => option.value === value) ?? options[selectedIndex];
+
+  useEffect(() => {
+    if (!open) return;
+    setActiveIndex(selectedIndex);
+    menuRef.current?.focus();
+  }, [open, selectedIndex]);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const closeOnWindowBlur = () => setOpen(false);
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    window.addEventListener("blur", closeOnWindowBlur);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      window.removeEventListener("blur", closeOnWindowBlur);
+    };
+  }, [open]);
+
+  const closeMenu = () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  const openMenu = () => {
+    if (disabled || options.length === 0) return;
+    setActiveIndex(selectedIndex);
+    setOpen(true);
+  };
+
+  const moveActive = (direction: 1 | -1) => {
+    if (options.length === 0) return;
+    let next = activeIndex;
+    for (let offset = 0; offset < options.length; offset += 1) {
+      next = (next + direction + options.length) % options.length;
+      if (!options[next].disabled) {
+        setActiveIndex(next);
+        return;
+      }
+    }
+  };
+
+  const moveToEdge = (edge: "start" | "end") => {
+    const indexes = options.map((option, index) => option.disabled ? -1 : index).filter((index) => index >= 0);
+    if (indexes.length > 0) setActiveIndex(edge === "start" ? indexes[0] : indexes[indexes.length - 1]);
+  };
+
+  const chooseActive = () => {
+    const option = options[activeIndex];
+    if (option && !option.disabled) {
+      onChange(option.value);
+      closeMenu();
+    }
+  };
+
+  const onTriggerKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (open) {
+        if (event.key === "ArrowDown") moveActive(1);
+        else if (event.key === "ArrowUp") moveActive(-1);
+        else chooseActive();
+      } else {
+        openMenu();
+      }
+    } else if (event.key === "Escape" && open) {
+      event.preventDefault();
+      closeMenu();
+    }
+  };
+
+  const onMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      moveActive(1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      moveActive(-1);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      moveToEdge("start");
+    } else if (event.key === "End") {
+      event.preventDefault();
+      moveToEdge("end");
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      chooseActive();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      closeMenu();
+    } else if (event.key === "Tab") {
+      event.preventDefault();
+      closeMenu();
+    }
+  };
+
+  return <div ref={rootRef} className={`select-wrap themed-select ${className}`.trim()}>
+    <button ref={triggerRef} id={id} className="themed-select-trigger" type="button" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId} disabled={disabled} onClick={() => open ? closeMenu() : openMenu()} onKeyDown={onTriggerKeyDown}>
+      <span>{selected?.label ?? value}</span>
+      <Glyph name="chevron" />
+    </button>
+    {open && <div ref={menuRef} id={menuId} className="themed-select-menu" role="listbox" tabIndex={-1} aria-label={ariaLabel} aria-activedescendant={`${menuId}-option-${activeIndex}`} onKeyDown={onMenuKeyDown}>
+      {options.map((option, index) => <button id={`${menuId}-option-${index}`} className={`themed-select-option ${index === activeIndex ? "themed-select-option-active" : ""} ${option.value === value ? "themed-select-option-selected" : ""}`} type="button" role="option" tabIndex={-1} aria-selected={option.value === value} disabled={option.disabled} key={option.value} onMouseEnter={() => setActiveIndex(index)} onClick={() => { onChange(option.value); closeMenu(); }}>
+        <span>{option.label}</span>
+        {option.value === value && <span className="themed-select-check" aria-hidden="true">✓</span>}
+      </button>)}
+    </div>}
+  </div>;
+}
+
+function ReasoningSelect({ model, value, onChange, compact = false, disabled = false }: { model?: ModelDefinition; value: ReasoningEffort; onChange(value: ReasoningEffort): void; compact?: boolean; disabled?: boolean }) { const { locale, t } = useTranslation(); const supported: ReasoningEffort[] = model?.capabilities.reasoning ? model.capabilities.reasoningEfforts ?? ["provider-default"] : ["provider-default"]; return <ThemedSelect className={`reasoning-select ${compact ? "reasoning-select-compact" : ""}`} ariaLabel={t("Reasoning level")} value={supported.includes(value) ? value : "provider-default"} disabled={disabled || supported.length <= 1} options={supported.map((effort) => ({ value: effort, label: reasoningLabel(locale, effort) }))} onChange={(nextValue) => onChange(nextValue as ReasoningEffort)} />; }
 
 function SpendPill({ taskCost, total }: { taskCost: number; total: number }) { const { locale, t } = useTranslation(); return <div className="spend-pill" title={t("Known cost reported by the provider during this task and through this OpenUse installation")}><span>{t("Spend")}</span><strong>{formatMoney(locale, taskCost)}</strong><small>/ {formatMoney(locale, total)} {t("total")}</small></div>; }
 function Estimate({ model, usage }: { model: ModelDefinition; usage: UsageSummary }) { const { locale, t } = useTranslation(); const profile = profileFromUsage(model, usage); const estimate = estimateTwentyStepCost(model, profile); return <span className="estimate" title={t("Approximate 20-step estimate based on recent local token usage and current catalog pricing. It is not a guarantee.")}>≈ {estimate === undefined ? t("unavailable") : formatMoney(locale, estimate)}</span>; }
