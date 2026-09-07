@@ -334,17 +334,12 @@ export function App() {
         <div className="compact-nav" aria-label={t("Compact navigation")}><button className="compact-nav-active" type="button"><Glyph name="activity" />{t("Activity")}</button><button type="button" disabled={isRunning} onClick={() => setSettingsOpen(true)}><Glyph name="sliders" />{t("Settings")}</button></div>
 
         <div className="content-wrap">
-          <section className="intro-row" aria-labelledby="page-title">
-            <div><div className="eyebrow"><span className="eyebrow-line" />{t("Local Computer Use")}</div><h1 id="page-title">{t("Put the next action in motion.")}</h1><p className="intro-copy">{t("Give OpenUse a clear command. It observes your desktop, acts through guarded tools, and shows you what changed.")}</p></div>
-            <div className="intro-meta"><div className="meta-label">{t("Current model")}</div><div className="meta-value">{activeModel.label}</div><div className="model-detail-id technical">{activeModel.id}</div><div className="capability-row"><span className={`capability ${activeModel.capabilities.vision ? "" : "capability-disabled"}`}><Glyph name="spark" />{activeModel.capabilities.vision ? t("Vision") : t("No vision")}</span><span className={`capability ${activeModel.capabilities.toolCalling ? "" : "capability-disabled"}`}><Glyph name="tool" />{activeModel.capabilities.toolCalling ? t("Tools") : t("No tools")}</span></div></div>
-          </section>
-
           {error && <div className="inline-alert" role="alert"><Glyph name="alert" /><span>{localizeRuntimeText(locale, error)}</span><button type="button" onClick={() => setError(undefined)} aria-label={t("Dismiss error")}>x</button></div>}
           {engine.platform === "darwin" && selfTest && !selfTest.ok && <MacPermissionSetup selfTest={selfTest} />}
 
           <div className="workspace-grid">
             <section className="activity-surface" aria-labelledby="activity-heading">
-              <div className="surface-header"><h2 id="activity-heading">{t("Activity")}</h2><div className={`state-badge state-${status}`}><span className="state-pulse" />{statusLabel(locale, status)}</div></div>
+              <div className="surface-header"><h1 className="activity-heading" id="activity-heading">{t("Activity")}</h1><div className={`state-badge state-${status}`}><span className="state-pulse" />{statusLabel(locale, status)}</div></div>
               <div className={`timeline ${entries.length === 0 ? "timeline-empty" : ""}`} aria-live="polite">{entries.length === 0 ? <EmptyActivity commands={starterCommandList} onStarter={useStarter} /> : entries.map((entry) => entry.kind === "user" ? <UserEntry key={entry.id} command={entry.command} /> : <ActionEntry key={entry.action.actionId} action={entry.action} />)}</div>
               <div className="activity-footer">
                 <div className="activity-metrics"><span>{isRunning ? <><span className="spinner" />{t("Step {step} / {actions} actions", { step: step || 1, actions: actionCount })}</> : t("{count} actions", { count: actionCount })}</span><span>{t("Task spend")} <strong>{formatMoney(locale, taskCost)}</strong></span><span>{t("20-step estimate")} <Estimate model={activeModel} usage={usage} /></span></div>
