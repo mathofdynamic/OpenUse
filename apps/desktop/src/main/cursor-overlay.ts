@@ -20,6 +20,7 @@ interface CursorOverlayOptions {
 
 export class CursorOverlayManager {
   private overlay: BrowserWindow | undefined;
+  private hideTimer: NodeJS.Timeout | undefined;
   private enabled = true;
   private color = "#c8f36a";
   private sequence = 0;
@@ -82,18 +83,35 @@ export class CursorOverlayManager {
     if (!this.enabled || !this.overlay || this.overlay.isDestroyed() || !target) return;
     const point = mapCursorTarget(target, this.displays, this.overlayBounds);
     if (!point) return;
+    this.clearHideTimer();
     this.sequence += 1;
     this.send({ visible: true, color: this.color, interaction, x: point.x, y: point.y, sequence: this.sequence });
     if (!this.overlay.isVisible()) this.overlay.showInactive();
   }
 
   hide(): void {
+    this.clearHideTimer();
     if (!this.overlay || this.overlay.isDestroyed()) return;
     this.send({ visible: false, color: this.color, interaction: "waiting", sequence: this.sequence });
     this.overlay.hide();
   }
 
+  /**
+   * Keep the final target visible long enough for the renderer's spring to
+   * communicate the action, without delaying the runtime or native task.
+   * Stop still calls hide() directly and therefore remains immediate.
+   */
+  hideAfterTask(delayMs = 420): void {
+    this.clearHideTimer();
+    if (!this.overlay || this.overlay.isDestroyed()) return;
+    this.hideTimer = setTimeout(() => {
+      this.hideTimer = undefined;
+      this.hide();
+    }, Math.max(0, delayMs));
+  }
+
   dispose(): void {
+    this.clearHideTimer();
     screen.removeListener("display-added", this.refreshDisplays);
     screen.removeListener("display-removed", this.refreshDisplays);
     screen.removeListener("display-metrics-changed", this.refreshDisplays);
@@ -114,5 +132,11 @@ export class CursorOverlayManager {
   private send(state: OverlayState): void {
     if (!this.overlay || this.overlay.isDestroyed() || this.overlay.webContents.isLoading()) return;
     this.overlay.webContents.send("openuse:overlay-state", state);
+  }
+
+  private clearHideTimer(): void {
+    if (this.hideTimer === undefined) return;
+    clearTimeout(this.hideTimer);
+    this.hideTimer = undefined;
   }
 }

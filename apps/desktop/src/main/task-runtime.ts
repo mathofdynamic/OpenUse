@@ -25,6 +25,7 @@ import {
 import type { SettingsStore } from "./settings-store";
 import type { NativeEngineProcess } from "./native-process";
 import type { UsageStore } from "./usage-store";
+import type { ThreadStore } from "./thread-store";
 
 export interface TaskRuntimeOptions {
   settings: SettingsStore;
@@ -34,6 +35,7 @@ export interface TaskRuntimeOptions {
   getModels: () => ModelDefinition[];
   usage: UsageStore;
   emit: (event: RuntimeEvent) => void;
+  threads?: ThreadStore;
   qualificationMode?: boolean;
 }
 
@@ -76,7 +78,7 @@ export class TaskRuntime {
   get isRunning(): boolean { return this.active !== undefined; }
   get permissionRecords(): PermissionRecord[] { return this.permissions.records(); }
 
-  async start(command: string): Promise<void> {
+  async start(command: string, requestedThreadId?: string): Promise<void> {
     if (this.active) throw new OpenUseError("UNSUPPORTED_ACTION", "Another task is already running.");
     const taskId = randomUUID();
     const abort = new AbortController();
@@ -91,9 +93,14 @@ export class TaskRuntime {
       : getModelDefinition(modelId, this.options.getModels());
     const capabilities = model?.capabilities ?? { toolCalling: false, vision: false };
     const reasoningEffort = resolveReasoningEffort(model, stored.reasoningEffort) ?? "provider-default";
+    const threadId = requestedThreadId ?? this.options.threads?.snapshot().currentThreadId;
+    const threadContext = threadId && this.options.threads?.continuationContext(threadId);
+    if (this.options.threads) {
+      await this.options.threads.beginTask({ threadId: threadId ?? "", taskId, command, modelId, provider: providerId, reasoningEffort, startedAt: new Date(startedAt).toISOString() });
+    }
     this.options.usage.beginTask({ taskId, modelId, provider: providerId, reasoningEffort });
-    this.options.emit({ type: "task.started", taskId, command, modelId, capabilities, at: nowIso() });
-    this.options.emit({ type: "engine.status", status: this.options.engine.status, at: nowIso() });
+    this.emit({ type: "task.started", taskId, threadId, command, modelId, capabilities, at: nowIso() });
+    this.emit({ type: "engine.status", status: this.options.engine.status, at: nowIso() });
 
     const prompt: PermissionPrompt = { request: (request, signal) => this.waitForPermission(taskId, request, signal) };
     const permissionEngine = new PermissionEngine(this.permissions, prompt);
@@ -108,7 +115,7 @@ export class TaskRuntime {
     const agent = new ComputerUseAgent(provider, new NativeComputerController(this.options.engine), permissionEngine);
     const finish = (status: "completed" | "stopped" | "error", summary: string, resultActionCount: number, durationMs: number, errorCode?: OpenUseErrorCode) => {
       this.options.usage.finishTask(taskId, status, stepCount, resultActionCount, durationMs);
-      this.options.emit({ type: "task.finished", taskId, status, summary, actionCount: resultActionCount, durationMs, ...(errorCode ? { errorCode } : {}), at: nowIso() });
+      this.emit({ type: "task.finished", taskId, status, summary, actionCount: resultActionCount, durationMs, ...(errorCode ? { errorCode } : {}), at: nowIso() });
     };
     const promise = agent.run({
       taskId,
@@ -117,6 +124,8 @@ export class TaskRuntime {
       maxActions: 30,
       abortSignal: abort.signal,
       reasoningEffort,
+      threadContext,
+      contextWindow: model?.contextWindow,
       qualificationMode: this.options.qualificationMode,
       onEvent: (event) => {
         if (event.type === "agent.step") stepCount = Math.max(stepCount, event.step);
@@ -129,8 +138,8 @@ export class TaskRuntime {
           const usage = this.options.usage.snapshot();
           event = { ...event, taskCost: this.options.usage.taskCost(taskId), lifetimeSpend: usage.totalKnownSpend };
         }
-        this.options.emit(event);
-        if (event.type === "action.completed" || event.type === "action.failed") this.options.emit({ type: "engine.status", status: this.options.engine.status, at: nowIso() });
+        this.emit(event);
+        if (event.type === "action.completed" || event.type === "action.failed") this.emit({ type: "engine.status", status: this.options.engine.status, at: nowIso() });
       },
     }).then((result) => {
       finish(result.status, result.summary, result.actionCount, Date.now() - startedAt, result.errorCode);
@@ -145,7 +154,7 @@ export class TaskRuntime {
         pending.reject(new OpenUseError("TASK_CANCELLED", "The task ended."));
         this.pendingPermissions.delete(id);
       }
-      this.options.emit({ type: "engine.status", status: this.options.engine.status, at: nowIso() });
+      this.emit({ type: "engine.status", status: this.options.engine.status, at: nowIso() });
     });
     this.active = { taskId, abort, promise };
     await promise;
@@ -179,8 +188,13 @@ export class TaskRuntime {
     return this.options.settings.publicSettings(apiKeyConfigured, customApiKeyConfigured);
   }
 
+  private emit(event: RuntimeEvent): void {
+    this.options.threads?.recordEvent(event);
+    this.options.emit(event);
+  }
+
   private waitForPermission(requestTaskId: string, request: PermissionRequest, signal: AbortSignal): Promise<PermissionDecision> {
-    this.options.emit({ type: "permission.requested", taskId: requestTaskId, request, at: nowIso() });
+    this.emit({ type: "permission.requested", taskId: requestTaskId, request, at: nowIso() });
     return new Promise<PermissionDecision>((resolve, reject) => {
       const abort = () => {
         this.pendingPermissions.delete(request.id);
@@ -191,7 +205,7 @@ export class TaskRuntime {
         taskId: requestTaskId,
         resolve: (decision) => {
           signal.removeEventListener("abort", abort);
-          this.options.emit({ type: "permission.resolved", taskId: requestTaskId, requestId: request.id, decision, at: nowIso() });
+          this.emit({ type: "permission.resolved", taskId: requestTaskId, requestId: request.id, decision, at: nowIso() });
           resolve(decision);
         },
         reject: (error) => {

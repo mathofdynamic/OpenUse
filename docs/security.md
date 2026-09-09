@@ -24,6 +24,12 @@ Computer Use is powerful. OpenUse keeps the model inside a typed, local runtime 
 
 The local usage ledger stores only task-level operational metadata: timestamp, provider/model ID, reasoning level, status, step/action counts, input/output token counts, known actual request cost, request count, and duration. It does not store the user command, screenshots, file contents, passwords, accessibility trees, full typed text, or model chain-of-thought. Cost is labeled as spend recorded through this OpenUse installation, not as an account-wide Gateway bill.
 
+The separate local thread store retains the task command and safe task metrics
+needed to show history and continue work in the selected thread. It never
+retains screenshots, accessibility trees, credentials, private window text, or
+chain-of-thought. Long thread context is compacted before it is sent back to a
+model; visible local history is not deleted.
+
 Development request diagnostics are opt-in through `OPENUSE_DEBUG_AI_REQUESTS=1` and contain only model ID, provider, and selected reasoning effort. They never include keys or prompt content.
 
 ## Data leaving the machine

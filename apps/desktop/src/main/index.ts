@@ -14,6 +14,7 @@ import { QualificationRecorder } from "./qualification-recorder";
 import { ModelCatalogStore } from "./model-catalog-store";
 import { UsageStore } from "./usage-store";
 import { CursorOverlayManager } from "./cursor-overlay";
+import { ThreadStore } from "./thread-store";
 
 let mainWindow: BrowserWindow | undefined;
 let settings: SettingsStore;
@@ -23,13 +24,17 @@ let runtime: TaskRuntime;
 let qualification: QualificationRecorder;
 let modelCatalog: ModelCatalogStore;
 let usage: UsageStore;
+let threads: ThreadStore;
 let cursorOverlay: CursorOverlayManager | undefined;
 let qualificationSelfTest: EngineSelfTestResult | undefined;
 let isQuitting = false;
 
 const modelSchema = z.object({ modelId: z.string().min(1).max(160) });
 const keySchema = z.object({ apiKey: z.string().trim().min(1).max(500) });
-const taskSchema = z.object({ command: z.string().trim().min(1).max(10_000) });
+const taskSchema = z.object({ command: z.string().trim().min(1).max(10_000), threadId: z.string().trim().min(1).max(120).optional() });
+const threadIdSchema = z.object({ threadId: z.string().trim().min(1).max(120) });
+const threadFolderSchema = z.object({ name: z.string().trim().min(1).max(80) });
+const moveThreadSchema = z.object({ threadId: z.string().trim().min(1).max(120), folderId: z.string().trim().min(1).max(120).optional() });
 const permissionDecisionSchema = z.object({
   id: z.string().min(1),
   decision: z.enum(["allow-once", "always-allow", "deny"]),
@@ -125,6 +130,7 @@ function publicSnapshot(): Promise<AppSnapshot> {
     qualification: { enabled: qualification.enabled, runId: qualification.runId, selfTest: qualificationSelfTest },
     modelCatalog: modelCatalog.snapshot(),
     usage: usage.snapshot(),
+    threads: threads.snapshot(),
   }));
 }
 
@@ -196,6 +202,31 @@ function installIpc(): void {
     await usage.reset();
     return publicSnapshot();
   });
+  ipcMain.handle("openuse:create-thread", async (event) => {
+    assertSender(event);
+    if (runtime.isRunning) throw new OpenUseError("UNSUPPORTED_ACTION", "Stop the current task before creating a thread.");
+    await threads.createThread();
+    return publicSnapshot();
+  });
+  ipcMain.handle("openuse:select-thread", async (event, raw: unknown) => {
+    assertSender(event);
+    if (runtime.isRunning) throw new OpenUseError("UNSUPPORTED_ACTION", "Stop the current task before changing threads.");
+    await threads.selectThread(threadIdSchema.parse(raw).threadId);
+    return publicSnapshot();
+  });
+  ipcMain.handle("openuse:create-thread-folder", async (event, raw: unknown) => {
+    assertSender(event);
+    if (runtime.isRunning) throw new OpenUseError("UNSUPPORTED_ACTION", "Stop the current task before changing thread folders.");
+    await threads.createFolder(threadFolderSchema.parse(raw).name);
+    return publicSnapshot();
+  });
+  ipcMain.handle("openuse:move-thread", async (event, raw: unknown) => {
+    assertSender(event);
+    if (runtime.isRunning) throw new OpenUseError("UNSUPPORTED_ACTION", "Stop the current task before changing thread folders.");
+    const input = moveThreadSchema.parse(raw);
+    await threads.moveThread(input.threadId, input.folderId);
+    return publicSnapshot();
+  });
   ipcMain.handle("openuse:window-minimize", (event) => {
     assertSender(event);
     mainWindow?.minimize();
@@ -235,8 +266,8 @@ function installIpc(): void {
   });
   ipcMain.handle("openuse:start-task", async (event, raw: unknown) => {
     assertSender(event);
-    const { command } = taskSchema.parse(raw);
-    await runtime.start(command);
+    const { command, threadId } = taskSchema.parse(raw);
+    await runtime.start(command, threadId);
   });
   ipcMain.handle("openuse:stop-task", async (event) => {
     assertSender(event);
@@ -324,6 +355,8 @@ async function bootstrap(): Promise<void> {
   await modelCatalog.initialize();
   usage = new UsageStore(join(app.getPath("userData"), "usage.json"));
   await usage.initialize();
+  threads = new ThreadStore(join(app.getPath("userData"), "threads.json"));
+  await threads.initialize();
   qualification = new QualificationRecorder({
     enabled: process.env.OPENUSE_QUALIFICATION_MODE === "1",
     directory: process.env.OPENUSE_QUALIFICATION_DIR,
@@ -342,12 +375,13 @@ async function bootstrap(): Promise<void> {
     readCustomApiKey: () => secrets.readCustom(),
     getModels: () => modelCatalog.snapshot().models,
     usage,
+    threads,
     emit: (event) => {
       qualification.record(event);
       logRuntimeEvent(event, !app.isPackaged);
       if (event.type === "cursor") cursorOverlay?.show(event.interaction, event.target);
-      if (event.type === "task.finished") {
-        cursorOverlay?.hide();
+      if (event.type === "task.started" || event.type === "task.finished") {
+        if (event.type === "task.finished") cursorOverlay?.hideAfterTask();
         void publicSnapshot().then((snapshot) => mainWindow?.webContents.send("openuse:snapshot", snapshot));
       }
       mainWindow?.webContents.send("openuse:event", event);
@@ -416,6 +450,7 @@ app.on("before-quit", (event) => {
   void (async () => {
     await runtime?.stop();
     await usage?.flush();
+    await threads?.flush();
     cursorOverlay?.hide();
     await engine?.shutdown();
     cursorOverlay?.dispose();

@@ -10,6 +10,7 @@ flowchart TD
     Main --> Catalog[Gateway model catalog and cache]
     Main --> Usage[Privacy-safe usage ledger]
     Main --> Cursor[Click-through Agent Cursor overlay]
+    Main --> Threads[Local task threads and folders]
     Main --> Agent[ComputerUseAgent]
     Agent --> Provider[Provider-neutral ModelProvider]
     Provider --> Gateway[Vercel AI Gateway]
@@ -40,6 +41,21 @@ flowchart TD
 The agent performs one provider request at a time, executes returned tools serially, observes again, and continues until `computer_finish`, cancellation, an error, or the bounded action limit. After every model request the main runtime records token usage and, when supplied and validated by Gateway metadata, the actual request cost. A deduplication key prevents a repeated runtime event from double-counting a request.
 
 The native sidecar is a child process using private JSON-lines stdin/stdout. It does not open a listener or expose a general shell. Stop aborts the provider request, rejects pending protocol work, sends the internal cancellation message, hides the cursor, and leaves the sidecar reusable after its bounded action drains.
+
+## Task threads and compaction
+
+Every started task is recorded in the selected local thread. Threads retain the
+user-visible command and safe task metrics so work can be continued later;
+folders organize threads without changing the agent or provider boundary.
+The thread store is separate from the usage ledger and never stores screenshots,
+accessibility trees, credentials, private UI text, or chain-of-thought.
+
+When a thread becomes long, the runtime keeps the complete local task history
+but supplies the agent only a bounded continuation summary plus the most recent
+tasks. The in-memory model transcript is compacted at the same boundary: old
+tool observations are replaced with a re-observe instruction while the original
+task and a valid recent assistant/tool turn are retained. Continuing a thread
+therefore does not replay stale UI state.
 
 ## Packaged resource resolution
 

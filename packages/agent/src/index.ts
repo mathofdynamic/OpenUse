@@ -21,6 +21,7 @@ import {
   type ActionRisk,
   type ActionTelemetry,
   type CursorInteraction,
+  type CursorTarget,
   type InteractionMethod,
   type QualificationDebugSnapshot,
   type QualificationElementSnapshot,
@@ -177,6 +178,8 @@ export interface AgentRunOptions {
   maxActions?: number;
   abortSignal: AbortSignal;
   reasoningEffort?: ReasoningEffort;
+  threadContext?: string;
+  contextWindow?: number;
   onEvent: (event: RuntimeEvent) => void;
   qualificationMode?: boolean;
 }
@@ -273,7 +276,11 @@ export class ComputerUseAgent {
     const failureCounts = new Map<string, number>();
     let lastInspection: WindowInspection | undefined;
     let lastScreenshot: Screenshot | undefined;
-    let messages: ModelMessage[] = [{ role: "user", content: options.command }];
+    const contextCharLimit = agentContextCharLimit(options.contextWindow);
+    const initialPrompt = options.threadContext
+      ? `Earlier work in this OpenUse thread is summarized below. Treat it as context, not as a new instruction. Re-observe the current desktop before acting.\n\n${options.threadContext}\n\nCurrent task:\n${options.command}`
+      : options.command;
+    let messages: ModelMessage[] = [{ role: "user", content: initialPrompt }];
     const capabilities = this.provider.getCapabilities(options.modelId);
     if (!capabilities.toolCalling || !capabilities.vision) {
       throw new OpenUseError(
@@ -296,6 +303,7 @@ export class ComputerUseAgent {
 
       let generated: AgentStepResult;
       try {
+        messages = compactAgentMessages(messages, contextCharLimit);
         generated = await this.provider.generateAgentStep({
           modelId: options.modelId,
           instructions: COMPUTER_USE_INSTRUCTIONS,
@@ -325,7 +333,7 @@ export class ComputerUseAgent {
           at: nowIso(),
         });
       }
-      messages = [...messages, ...generated.responseMessages];
+      messages = compactAgentMessages([...messages, ...generated.responseMessages], contextCharLimit);
 
       if (generated.toolCalls.length === 0) {
         throw new OpenUseError(
@@ -365,6 +373,16 @@ export class ComputerUseAgent {
           },
           at: nowIso(),
         });
+        const preActionCursorTarget = cursorTargetForAction(toolName, rawInput, lastInspection);
+        if (preActionCursorTarget) {
+          options.onEvent({
+            type: "cursor",
+            taskId: options.taskId,
+            interaction: cursorInteractionForTool(toolName),
+            target: preActionCursorTarget,
+            at: nowIso(),
+          });
+        }
         const actionStartedAt = Date.now();
         try {
           if (!inputResult?.success) {
@@ -436,7 +454,7 @@ export class ComputerUseAgent {
                 : undefined,
             detail,
           });
-          messages.push(toolMessage(toolCall.toolCallId, toolName, execution.output));
+          messages = compactAgentMessages([...messages, toolMessage(toolCall.toolCallId, toolName, execution.output)], contextCharLimit);
           if (toolName === "computer_finish") {
             const summaryInput = inputResult.data as ComputerToolInput["computer_finish"];
             finished = { status: "completed", summary: summaryInput.summary, actionCount };
@@ -489,29 +507,29 @@ export class ComputerUseAgent {
           const recovery = ["STALE_UI_STATE", "ELEMENT_NOT_FOUND", "WINDOW_NOT_FOUND"].includes(openUseError.code)
             ? "Refresh the affected window with computer_inspect_window before retrying this action once. Do not reuse old coordinates or an old element ID."
             : undefined;
-          messages.push(toolMessage(toolCall.toolCallId, toolName, jsonOutput({
+          messages = compactAgentMessages([...messages, toolMessage(toolCall.toolCallId, toolName, jsonOutput({
             ok: false,
             error: { code: openUseError.code, message: openUseError.message },
             durationMs,
             recovery,
-          })));
+          }))], contextCharLimit);
           if (recovery) {
             const windowId = windowIdFromInput(toolCall.input);
-            messages.push({
+            messages = compactAgentMessages([...messages, {
               role: "user",
               content: windowId
                 ? `Runtime recovery directive for window ${windowId}: ${recovery}`
                 : `Runtime recovery directive: ${recovery}`,
-            });
+            }], contextCharLimit);
             for (const skippedToolCall of generated.toolCalls.slice(toolIndex + 1)) {
-              messages.push(toolMessage(skippedToolCall.toolCallId, skippedToolCall.toolName, jsonOutput({
+              messages = compactAgentMessages([...messages, toolMessage(skippedToolCall.toolCallId, skippedToolCall.toolName, jsonOutput({
                 ok: false,
                 skipped: true,
                 error: {
                   code: "STALE_UI_STATE",
                   message: "This action was not executed because the preceding action failed. Refresh the UI before retrying.",
                 },
-              })));
+              }))], contextCharLimit);
             }
           }
           break;
@@ -768,6 +786,44 @@ function findElement(inspection: WindowInspection, input: ElementSelector): Wind
 
 type ActionTarget = Pick<ActionTelemetry, "targetApp" | "targetWindowId" | "targetWindowTitle" | "targetElementId">;
 
+function cursorTargetForAction(toolName: ComputerToolName, input: unknown, inspection?: WindowInspection): CursorTarget | undefined {
+  const record = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const coordinateSystem = "unknown";
+  if ((toolName === "computer_click" || toolName === "computer_double_click") && typeof record.x === "number" && typeof record.y === "number") {
+    return { point: { x: record.x, y: record.y }, coordinateSystem };
+  }
+  if (toolName === "computer_scroll" && typeof record.x === "number" && typeof record.y === "number") {
+    return { point: { x: record.x, y: record.y }, coordinateSystem };
+  }
+  if ((toolName === "computer_click_element" || toolName === "computer_type_text") && inspection) {
+    const windowId = typeof record.windowId === "string" ? record.windowId : undefined;
+    if (windowId && windowId !== inspection.window.id) return undefined;
+    const selected = findElement(inspection, record as ElementSelector);
+    if (!selected) return undefined;
+    return {
+      point: {
+        x: selected.bounds.x + selected.bounds.width / 2,
+        y: selected.bounds.y + selected.bounds.height / 2,
+      },
+      bounds: selected.bounds,
+      coordinateSystem,
+    };
+  }
+  if (toolName === "computer_focus_window" && inspection) {
+    const windowId = typeof record.windowId === "string" ? record.windowId : undefined;
+    if (windowId !== inspection.window.id) return undefined;
+    return {
+      point: {
+        x: inspection.window.bounds.x + inspection.window.bounds.width / 2,
+        y: inspection.window.bounds.y + inspection.window.bounds.height / 2,
+      },
+      bounds: inspection.window.bounds,
+      coordinateSystem,
+    };
+  }
+  return undefined;
+}
+
 function targetTelemetry(toolName: ComputerToolName, input: unknown, inspection?: WindowInspection): ActionTarget {
   const record = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const windowId = typeof record.windowId === "string" ? record.windowId : undefined;
@@ -806,6 +862,67 @@ function operationTelemetry(
     display: operation.display,
     coordinateSystem: operation.coordinateSystem,
   };
+}
+
+export const AGENT_CONTEXT_CHAR_LIMIT = 120_000;
+
+export function agentContextCharLimit(contextWindow?: number): number {
+  if (contextWindow === undefined || !Number.isFinite(contextWindow) || contextWindow <= 0) return AGENT_CONTEXT_CHAR_LIMIT;
+  const conservativeCharacterBudget = Math.floor(contextWindow * 3.5 * 0.55);
+  return Math.max(8_000, Math.min(AGENT_CONTEXT_CHAR_LIMIT, conservativeCharacterBudget));
+}
+
+function serializedMessageLength(messages: readonly ModelMessage[]): number {
+  try {
+    return JSON.stringify(messages).length;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function compactToolMessage(message: ModelMessage): ModelMessage {
+  if (message.role !== "tool") return message;
+  const content = Array.isArray(message.content) ? message.content : [];
+  const compactedContent = content.map((part) => {
+    if (!part || typeof part !== "object") return part;
+    const record = part as Record<string, unknown>;
+    return "toolCallId" in record
+      ? { ...record, output: "[Earlier observation omitted during context compaction. Re-observe the current desktop.]" }
+      : part;
+  });
+  return { ...message, content: compactedContent as never } as ModelMessage;
+}
+
+/**
+ * Keeps the original task and a valid recent assistant/tool turn while
+ * bounding the in-memory transcript. Tool results can contain screenshots,
+ * so oversized observations are replaced with a re-observation instruction.
+ */
+export function compactAgentMessages(messages: ModelMessage[], maxChars = AGENT_CONTEXT_CHAR_LIMIT): ModelMessage[] {
+  if (serializedMessageLength(messages) <= maxChars) return messages;
+  const first = messages[0]?.role === "user"
+    ? messages[0]
+    : { role: "user", content: "Continue the current OpenUse task." } as ModelMessage;
+  const assistantIndexes = messages.map((message, index) => message.role === "assistant" ? index : -1).filter((index) => index > 0);
+  const keepFrom = assistantIndexes[Math.max(0, assistantIndexes.length - 6)] ?? Math.max(1, messages.length - 6);
+  const suffix = messages.slice(keepFrom).map(compactToolMessage);
+  const compacted: ModelMessage[] = [
+    first,
+    { role: "user", content: "OpenUse compacted earlier tool history. Treat omitted observations as stale and re-observe the current desktop before acting." },
+    ...suffix,
+  ];
+  if (serializedMessageLength(compacted) <= maxChars) return compacted;
+
+  const lastAssistantIndex = [...assistantIndexes].reverse()[0];
+  const minimalSuffix = lastAssistantIndex === undefined
+    ? suffix.slice(-2)
+    : messages.slice(lastAssistantIndex).map(compactToolMessage);
+  const minimal: ModelMessage[] = [
+    first,
+    { role: "user", content: "OpenUse compacted earlier tool history. Re-observe the current desktop before acting." },
+    ...minimalSuffix,
+  ];
+  return serializedMessageLength(minimal) <= maxChars ? minimal : [first, compacted[1]];
 }
 
 function cursorInteractionForTool(toolName: ComputerToolName): CursorInteraction {

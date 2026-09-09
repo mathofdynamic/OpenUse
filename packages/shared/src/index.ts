@@ -277,6 +277,52 @@ export interface UsageSummary {
   lastUpdatedAt?: string;
 }
 
+export type ThreadTaskStatus = "running" | "completed" | "stopped" | "error";
+
+export interface ThreadFolder {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ThreadTaskRecord {
+  id: string;
+  command: string;
+  modelId: string;
+  provider: ProviderId;
+  reasoningEffort: ReasoningEffort;
+  status: ThreadTaskStatus;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt?: string;
+  steps: number;
+  actions: number;
+  inputTokens: number;
+  outputTokens: number;
+  knownCost: number;
+  knownCostRequests: number;
+  unpricedRequests: number;
+  durationMs: number;
+}
+
+export interface ThreadRecord {
+  id: string;
+  title: string;
+  folderId?: string;
+  createdAt: string;
+  updatedAt: string;
+  tasks: ThreadTaskRecord[];
+  contextSummary?: string;
+  contextCompactedAt?: string;
+}
+
+export interface ThreadSnapshot {
+  currentThreadId: string;
+  threads: ThreadRecord[];
+  folders: ThreadFolder[];
+}
+
 export interface AppSnapshot {
   settings: AppSettings;
   engine: EngineStatus;
@@ -286,6 +332,7 @@ export interface AppSnapshot {
     status: ModelCatalogStatus;
   };
   usage: UsageSummary;
+  threads: ThreadSnapshot;
 }
 
 export interface TimelineAction {
@@ -315,6 +362,7 @@ export type RuntimeEvent =
   | {
       type: "task.started";
       taskId: string;
+      threadId?: string;
       command: string;
       modelId: string;
       capabilities: ModelCapabilities;

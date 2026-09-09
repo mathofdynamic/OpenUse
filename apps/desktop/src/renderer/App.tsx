@@ -18,6 +18,9 @@ import type {
   ReasoningEffort,
   RuntimeEvent,
   TimelineAction,
+  ThreadFolder,
+  ThreadRecord,
+  ThreadSnapshot,
   UsageSummary,
 } from "@openuse/shared";
 import { formatDuration, formatMoney, formatNumber, formatPricePerMillion, localizeRuntimeText, platformName, providerLabel, reasoningLabel, starterCommands, statusLabel, translate } from "./i18n";
@@ -61,6 +64,11 @@ const emptyUsage: UsageSummary = {
 };
 const emptyCatalogStatus: ModelCatalogStatus = { source: "bundled-fallback", isRefreshing: false, count: MODEL_CATALOG.length };
 const emptyQualification: QualificationSessionInfo = { enabled: false };
+const emptyThreadSnapshot: ThreadSnapshot = {
+  currentThreadId: "preview-thread",
+  folders: [],
+  threads: [{ id: "preview-thread", title: "New thread", createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(), tasks: [] }],
+};
 
 const emptySnapshot: AppSnapshot = {
   settings: { ...emptySettings, permissions: defaultPermissionRecords() },
@@ -68,6 +76,7 @@ const emptySnapshot: AppSnapshot = {
   qualification: emptyQualification,
   modelCatalog: { models: MODEL_CATALOG, status: emptyCatalogStatus },
   usage: emptyUsage,
+  threads: emptyThreadSnapshot,
 };
 
 let browserPreviewSnapshot = emptySnapshot;
@@ -102,6 +111,31 @@ const browserPreviewBridge: Window["openuse"] = {
   openMacPrivacy: async () => { throw new Error("macOS privacy settings are available in the OpenUse desktop app."); },
   relaunch: async () => { throw new Error("Relaunch is available in the OpenUse desktop app."); },
   startTask: async () => { throw new Error("Computer control is available in the OpenUse desktop app."); },
+  createThread: async () => {
+    const timestamp = new Date().toISOString();
+    const thread = { id: `preview-thread-${Date.now()}`, title: "New thread", createdAt: timestamp, updatedAt: timestamp, tasks: [] } satisfies ThreadRecord;
+    browserPreviewSnapshot = { ...browserPreviewSnapshot, threads: { ...browserPreviewSnapshot.threads, currentThreadId: thread.id, threads: [thread, ...browserPreviewSnapshot.threads.threads] } };
+    return browserPreviewSnapshot;
+  },
+  selectThread: async (threadId) => {
+    if (!browserPreviewSnapshot.threads.threads.some((thread) => thread.id === threadId)) throw new Error("The selected thread no longer exists.");
+    browserPreviewSnapshot = { ...browserPreviewSnapshot, threads: { ...browserPreviewSnapshot.threads, currentThreadId: threadId } };
+    return browserPreviewSnapshot;
+  },
+  createThreadFolder: async (name) => {
+    const timestamp = new Date().toISOString();
+    const folder = { id: `preview-folder-${Date.now()}`, name: name.trim(), createdAt: timestamp, updatedAt: timestamp } satisfies ThreadFolder;
+    browserPreviewSnapshot = { ...browserPreviewSnapshot, threads: { ...browserPreviewSnapshot.threads, folders: [...browserPreviewSnapshot.threads.folders, folder] } };
+    return browserPreviewSnapshot;
+  },
+  moveThread: async (threadId, folderId) => {
+    browserPreviewSnapshot = { ...browserPreviewSnapshot, threads: { ...browserPreviewSnapshot.threads, threads: browserPreviewSnapshot.threads.threads.map((thread) => {
+      if (thread.id !== threadId || folderId) return thread.id === threadId ? { ...thread, ...(folderId ? { folderId } : {}) } : thread;
+      const { folderId: _folderId, ...unfiled } = thread;
+      return unfiled;
+    }) } };
+    return browserPreviewSnapshot;
+  },
   stopTask: async () => undefined,
   refreshModelCatalog: async () => emptySnapshot,
   resetUsage: async () => emptySnapshot,
@@ -123,6 +157,7 @@ export function App() {
   const [models, setModels] = useState<ModelDefinition[]>(MODEL_CATALOG);
   const [catalogStatus, setCatalogStatus] = useState<ModelCatalogStatus>(emptyCatalogStatus);
   const [usage, setUsage] = useState<UsageSummary>(emptyUsage);
+  const [threadSnapshot, setThreadSnapshot] = useState<ThreadSnapshot>(emptyThreadSnapshot);
   const [selfTest, setSelfTest] = useState<EngineSelfTestResult | undefined>();
   const [entries, setEntries] = useState<TimelineEntry[]>([]);
   const [command, setCommand] = useState("");
@@ -136,6 +171,11 @@ export function App() {
   const [customKeyDraft, setCustomKeyDraft] = useState("");
   const [error, setError] = useState<string | undefined>();
   const [connectionTest, setConnectionTest] = useState<ConnectionTestState>("idle");
+  const [threadPanelOpen, setThreadPanelOpen] = useState(false);
+  const [folderFilter, setFolderFilter] = useState("all");
+  const [folderFormOpen, setFolderFormOpen] = useState(false);
+  const [folderNameDraft, setFolderNameDraft] = useState("");
+  const [currentTaskId, setCurrentTaskId] = useState<string | undefined>();
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const appearanceRevision = useRef(0);
   const locale = settings.locale ?? "en";
@@ -153,6 +193,7 @@ export function App() {
     setModels(snapshot.modelCatalog.models);
     setCatalogStatus(snapshot.modelCatalog.status);
     setUsage(snapshot.usage);
+    setThreadSnapshot(snapshot.threads);
   }
 
   useEffect(() => {
@@ -168,6 +209,7 @@ export function App() {
       setEngine,
       setError,
       setSelfTest,
+      setCurrentTaskId,
     }));
     const unsubscribeSnapshot = runtimeApi.onSnapshot(applySnapshot);
     return () => { unsubscribeEvent(); unsubscribeSnapshot(); };
@@ -190,6 +232,8 @@ export function App() {
       capabilities: { toolCalling: false, vision: false },
     } satisfies ModelDefinition;
   }, [models, settings]);
+  const currentThread = threadSnapshot.threads.find((thread) => thread.id === threadSnapshot.currentThreadId) ?? threadSnapshot.threads[0] ?? emptyThreadSnapshot.threads[0];
+  const currentFolder = currentThread.folderId ? threadSnapshot.folders.find((folder) => folder.id === currentThread.folderId) : undefined;
   const compatible = getCompatibilityIssues(activeModel).length === 0;
   const isRunning = status === "running";
   const engineCanStart = engine.state === "ready" || engine.canStart === true;
@@ -226,7 +270,7 @@ export function App() {
     setActionCount(0);
     setTaskCost(0);
     try {
-      await runtimeApi.startTask(command.trim());
+      await runtimeApi.startTask(command.trim(), threadSnapshot.currentThreadId);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "OpenUse could not start the task.");
     }
@@ -293,6 +337,57 @@ export function App() {
     applySnapshot(await runtimeApi.getSnapshot());
   }
 
+  function resetActivityForThread(snapshot: ThreadSnapshot) {
+    const selected = snapshot.threads.find((thread) => thread.id === snapshot.currentThreadId);
+    const latest = selected?.tasks.at(-1);
+    setEntries([]);
+    setCurrentTaskId(undefined);
+    setCommand("");
+    setStep(latest?.steps ?? 0);
+    setActionCount(latest?.actions ?? 0);
+    setTaskCost(latest?.knownCost ?? 0);
+    setStatus(latest?.status === "completed" || latest?.status === "stopped" || latest?.status === "error" ? latest.status : "idle");
+  }
+
+  async function createNewThread() {
+    if (isRunning) return;
+    try {
+      const snapshot = await runtimeApi.createThread();
+      applySnapshot(snapshot);
+      resetActivityForThread(snapshot.threads);
+      setThreadPanelOpen(false);
+      composerRef.current?.focus();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "A new thread could not be created."); }
+  }
+
+  async function selectThread(threadId: string) {
+    if (isRunning) return;
+    try {
+      const snapshot = await runtimeApi.selectThread(threadId);
+      applySnapshot(snapshot);
+      resetActivityForThread(snapshot.threads);
+      setThreadPanelOpen(false);
+      composerRef.current?.focus();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "The thread could not be opened."); }
+  }
+
+  async function createThreadFolder() {
+    const name = folderNameDraft.trim();
+    if (!name) return;
+    try {
+      const snapshot = await runtimeApi.createThreadFolder(name);
+      applySnapshot(snapshot);
+      setFolderNameDraft("");
+      setFolderFormOpen(false);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "The thread folder could not be created."); }
+  }
+
+  async function moveThread(threadId: string, folderId: string) {
+    try {
+      applySnapshot(await runtimeApi.moveThread(threadId, folderId === "none" ? undefined : folderId));
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "The thread could not be moved."); }
+  }
+
   function useStarter(value: string) {
     setCommand(value);
     composerRef.current?.focus();
@@ -333,6 +428,11 @@ export function App() {
 
         <div className="compact-nav" aria-label={t("Compact navigation")}><button className="compact-nav-active" type="button"><Glyph name="activity" />{t("Activity")}</button><button type="button" disabled={isRunning} onClick={() => setSettingsOpen(true)}><Glyph name="sliders" />{t("Settings")}</button></div>
 
+        <div className="thread-toolbar-wrap">
+          <ThreadToolbar thread={currentThread} folder={currentFolder} open={threadPanelOpen} onToggle={() => setThreadPanelOpen((current) => !current)} onNew={createNewThread} />
+          {threadPanelOpen && <ThreadPanel snapshot={threadSnapshot} selectedFolder={folderFilter} folderFormOpen={folderFormOpen} folderName={folderNameDraft} onFolderFilter={setFolderFilter} onFolderForm={() => setFolderFormOpen((current) => !current)} onFolderName={setFolderNameDraft} onCreateFolder={() => void createThreadFolder()} onCancelFolder={() => { setFolderFormOpen(false); setFolderNameDraft(""); }} onSelectThread={(threadId) => void selectThread(threadId)} onMoveThread={(threadId, folderId) => void moveThread(threadId, folderId)} onNew={createNewThread} />}
+        </div>
+
         <div className="content-wrap">
           {error && <div className="inline-alert" role="alert"><Glyph name="alert" /><span>{localizeRuntimeText(locale, error)}</span><button type="button" onClick={() => setError(undefined)} aria-label={t("Dismiss error")}>x</button></div>}
           {engine.platform === "darwin" && selfTest && !selfTest.ok && <MacPermissionSetup selfTest={selfTest} />}
@@ -340,7 +440,7 @@ export function App() {
           <div className="workspace-grid">
             <section className="activity-surface" aria-labelledby="activity-heading">
               <div className="surface-header"><h1 className="activity-heading" id="activity-heading">{t("Activity")}</h1><div className={`state-badge state-${status}`}><span className="state-pulse" />{statusLabel(locale, status)}</div></div>
-              <div className={`timeline ${entries.length === 0 ? "timeline-empty" : ""}`} aria-live="polite">{entries.length === 0 ? <EmptyActivity commands={starterCommandList} onStarter={useStarter} /> : entries.map((entry) => entry.kind === "user" ? <UserEntry key={entry.id} command={entry.command} /> : <ActionEntry key={entry.action.actionId} action={entry.action} />)}</div>
+              <div className={`timeline ${entries.length === 0 ? "timeline-empty" : ""}`} aria-live="polite">{entries.length === 0 ? currentThread.tasks.length > 0 ? <ThreadHistory thread={currentTaskId ? { ...currentThread, tasks: currentThread.tasks.filter((task) => task.id !== currentTaskId) } : currentThread} onContinue={() => { setCommand(""); composerRef.current?.focus(); }} /> : <EmptyActivity commands={starterCommandList} onStarter={useStarter} /> : entries.map((entry) => entry.kind === "user" ? <UserEntry key={entry.id} command={entry.command} /> : <ActionEntry key={entry.action.actionId} action={entry.action} />)}</div>
               <div className="activity-footer">
                 <div className="activity-metrics"><span>{isRunning ? <><span className="spinner" />{t("Step {step} / {actions} actions", { step: step || 1, actions: actionCount })}</> : t("{count} actions", { count: actionCount })}</span><span>{t("Task spend")} <strong>{formatMoney(locale, taskCost)}</strong></span><span>{t("20-step estimate")} <Estimate model={activeModel} usage={usage} /></span></div>
                 <div className="composer"><textarea ref={composerRef} value={command} onChange={(event) => setCommand(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) void runTask(); }} placeholder={t("Tell OpenUse what to do...")} aria-label={t("Task command")} rows={2} disabled={isRunning} /><div className="composer-bottom"><span className="composer-hint">{t("Ctrl + Enter to run")}</span>{isRunning ? <button className="stop-button" type="button" onClick={() => void stopTask()}><span className="stop-square" />{t("Stop task")}</button> : <button className="run-button" type="button" disabled={!command.trim()} onClick={() => void runTask()}><span>{t("Run task")}</span><Glyph name="arrow" /></button>}</div></div>
@@ -385,12 +485,14 @@ function handleRuntimeEvent(event: RuntimeEvent, setters: {
   setTaskCost: Dispatch<SetStateAction<number>>;
   setUsage: Dispatch<SetStateAction<UsageSummary>>;
   setPermission: Dispatch<SetStateAction<PermissionRequest | undefined>>;
-  setEngine: Dispatch<SetStateAction<EngineStatus>>;
-  setError: Dispatch<SetStateAction<string | undefined>>;
-  setSelfTest: Dispatch<SetStateAction<EngineSelfTestResult | undefined>>;
+    setEngine: Dispatch<SetStateAction<EngineStatus>>;
+    setError: Dispatch<SetStateAction<string | undefined>>;
+    setSelfTest: Dispatch<SetStateAction<EngineSelfTestResult | undefined>>;
+    setCurrentTaskId: Dispatch<SetStateAction<string | undefined>>;
 }) {
   switch (event.type) {
     case "task.started":
+      setters.setCurrentTaskId(event.taskId);
       setters.setStatus("running");
       setters.setTaskCost(0);
       setters.setEntries([{ kind: "user", id: `user-${event.taskId}`, command: event.command }]);
@@ -407,6 +509,56 @@ function handleRuntimeEvent(event: RuntimeEvent, setters: {
     case "engine.status": setters.setEngine(event.status); break;
     case "qualification.self-test": setters.setSelfTest(event.result); break;
   }
+}
+
+function ThreadToolbar({ thread, folder, open, onToggle, onNew }: { thread: ThreadRecord; folder?: ThreadFolder; open: boolean; onToggle(): void; onNew(): void }) {
+  const { t } = useTranslation();
+  return <div className="thread-toolbar" aria-label={t("Thread management")}>
+    <button className="thread-switcher-trigger" type="button" aria-haspopup="dialog" aria-expanded={open} onClick={onToggle}>
+      <span className="thread-switcher-icon"><Glyph name="activity" /></span>
+      <span className="thread-switcher-copy"><small>{t("Thread")}</small><strong>{thread.title}</strong><em>{folder?.name ?? t("Unfiled")}</em></span>
+      <Glyph name="chevron" />
+    </button>
+    <button className="thread-new-button" type="button" onClick={onNew}><Glyph name="plus" />{t("New thread")}</button>
+  </div>;
+}
+
+function ThreadPanel({ snapshot, selectedFolder, folderFormOpen, folderName, onFolderFilter, onFolderForm, onFolderName, onCreateFolder, onCancelFolder, onSelectThread, onMoveThread, onNew }: {
+  snapshot: ThreadSnapshot;
+  selectedFolder: string;
+  folderFormOpen: boolean;
+  folderName: string;
+  onFolderFilter(folderId: string): void;
+  onFolderForm(): void;
+  onFolderName(value: string): void;
+  onCreateFolder(): void;
+  onCancelFolder(): void;
+  onSelectThread(threadId: string): void;
+  onMoveThread(threadId: string, folderId: string): void;
+  onNew(): void;
+}) {
+  const { locale, t } = useTranslation();
+  const visibleThreads = snapshot.threads.filter((thread) => selectedFolder === "all" || thread.folderId === selectedFolder);
+  const folderOptions: ThemedSelectOption[] = [{ value: "none", label: t("No folder") }, ...snapshot.folders.map((folder) => ({ value: folder.id, label: folder.name }))];
+  return <section className="thread-panel" role="dialog" aria-label={t("Threads")}>
+    <div className="thread-panel-header"><div><div className="dialog-eyebrow">{t("Threads")}</div><strong>{t("Continue work without losing the thread.")}</strong></div><button className="secondary-action thread-folder-button" type="button" onClick={onFolderForm}><Glyph name="plus" />{t("New folder")}</button></div>
+    {folderFormOpen && <form className="thread-folder-form" onSubmit={(event) => { event.preventDefault(); onCreateFolder(); }}><input autoFocus value={folderName} onChange={(event) => onFolderName(event.target.value)} placeholder={t("Folder name")} aria-label={t("Folder name")} maxLength={80} /><button className="primary-action" type="submit" disabled={!folderName.trim()}>{t("Create folder")}</button><button className="secondary-action" type="button" onClick={onCancelFolder}>{t("Cancel")}</button></form>}
+    <div className="thread-folder-tabs" role="tablist" aria-label={t("Thread folders")}><button className={selectedFolder === "all" ? "thread-folder-tab-active" : ""} type="button" onClick={() => onFolderFilter("all")}>{t("All threads")}</button>{snapshot.folders.map((folder) => <button className={selectedFolder === folder.id ? "thread-folder-tab-active" : ""} type="button" key={folder.id} onClick={() => onFolderFilter(folder.id)}>{folder.name}</button>)}</div>
+    <div className="thread-list">{visibleThreads.length === 0 ? <div className="empty-note">{t("No threads in this folder.")}</div> : visibleThreads.map((thread) => {
+      const latest = thread.tasks.at(-1);
+      return <div className={`thread-row ${thread.id === snapshot.currentThreadId ? "thread-row-selected" : ""}`} key={thread.id}>
+        <button className="thread-row-main" type="button" onClick={() => onSelectThread(thread.id)}><strong>{thread.title}</strong><small>{latest ? `${statusLabel(locale, latest.status)} · ${latest.actions} ${t("actions")} · ${latest.steps} ${t("steps")}` : t("No tasks yet")}</small></button>
+        <ThemedSelect className="thread-folder-select" value={thread.folderId ?? "none"} options={folderOptions} ariaLabel={`${t("Move thread")} ${thread.title}`} onChange={(value) => onMoveThread(thread.id, value)} />
+      </div>;
+    })}</div>
+    <div className="thread-panel-footer"><span>{t("{count} threads", { count: snapshot.threads.length })}</span><button className="thread-panel-new-link" type="button" onClick={onNew}>{t("New thread")}</button></div>
+  </section>;
+}
+
+function ThreadHistory({ thread, onContinue }: { thread: ThreadRecord; onContinue(): void }) {
+  const { locale, t } = useTranslation();
+  const tasks = [...thread.tasks].reverse();
+  return <div className="thread-history"><div className="thread-history-heading"><div><div className="dialog-eyebrow">{t("Task history")}</div><strong>{thread.title}</strong></div>{thread.contextCompactedAt && <span className="thread-compacted-note">{t("Context compacted")}</span>}</div>{tasks.map((task) => <article className="thread-task-card" key={task.id}><div className="thread-task-card-top"><span>{t("Task")}</span><span className={`thread-task-status thread-task-status-${task.status}`}>{statusLabel(locale, task.status)}</span></div><p>{task.command}</p><div className="thread-task-meta"><span>{task.modelId}</span><span>{task.actions} {t("actions")}</span><span>{task.steps} {t("steps")}</span><span>{formatDuration(locale, task.durationMs)}</span></div></article>)}<button className="thread-continue-button" type="button" onClick={onContinue}>{t("Continue in this thread")} <Glyph name="arrow" /></button></div>;
 }
 
 function BrandLockup() { const { t } = useTranslation(); return <div className="brand-lockup"><div className="brand-mark" aria-hidden="true"><span /></div><div><div className="brand-name">OpenUse</div><div className="brand-caption">{t("computer runtime")}</div></div></div>; }
@@ -510,7 +662,7 @@ function AppearanceSettings({ settings, onAppearance, onLocale }: { settings: Ap
 
 function RangeField({ id, label, value, min, max, step, suffix, onChange }: { id: string; label: string; value: number; min: number; max: number; step: number; suffix: string; onChange(value: number): void }) { const { locale } = useTranslation(); const localizedSuffix = locale === "fa" ? (suffix === "px" ? " پیکسل" : "٪") : suffix; return <div className="settings-field range-field"><div className="field-label-row"><label htmlFor={id}>{label}</label><output htmlFor={id}>{formatNumber(locale, value)}{localizedSuffix}</output></div><input id={id} type="range" value={value} min={min} max={max} step={step} onChange={(event) => onChange(Number(event.target.value))} /></div>; }
 
-function UsageSettings({ usage, onReset }: { usage: UsageSummary; onReset(): void }) { const { locale, t } = useTranslation(); return <div className="settings-section"><div className="dialog-eyebrow">{t("Usage")}</div><h3>{t("Spend recorded through this installation.")}</h3><div className="usage-grid"><Metric label={t("Known spend")} value={formatMoney(locale, usage.totalKnownSpend)} /><Metric label={t("Completed tasks")} value={formatNumber(locale, usage.completedTasks)} /><Metric label={t("Input tokens")} value={formatNumber(locale, usage.inputTokens)} /><Metric label={t("Output tokens")} value={formatNumber(locale, usage.outputTokens)} /><Metric label={t("Average task")} value={usage.averageTaskCost === undefined ? "-" : formatMoney(locale, usage.averageTaskCost)} /><Metric label={t("Unpriced requests")} value={formatNumber(locale, usage.unpricedRequests)} /></div><p className="field-note">{t("Only model IDs, token counts, action counts, timing, status, reasoning level, and known cost are stored. Commands, screenshots, accessibility content, credentials, and chain-of-thought are not written.")}</p><div className="settings-divider" /><div className="settings-section-heading"><div><div className="dialog-eyebrow">{t("Recent model usage")}</div><h4>{t("Where requests are going")}</h4></div></div><div className="model-usage-list">{usage.modelUsage.length === 0 ? <div className="empty-note">{t("Usage appears after the first model request.")}</div> : usage.modelUsage.slice(0, 12).map((model) => <div className="model-usage-row" key={`${model.provider}:${model.modelId}`}><div><strong className="technical">{model.modelId}</strong><span className="technical">{model.provider} / {formatNumber(locale, model.requestCount)} {t("requests")}</span></div><strong>{formatMoney(locale, model.knownSpend)}</strong></div>)}</div><button className="danger-outline" type="button" onClick={() => { if (window.confirm(t("Reset local usage history? This cannot be undone."))) onReset(); }}>{t("Reset local usage history")}</button></div>; }
+function UsageSettings({ usage, onReset }: { usage: UsageSummary; onReset(): void }) { const { locale, t } = useTranslation(); return <div className="settings-section"><div className="dialog-eyebrow">{t("Usage")}</div><h3>{t("Spend recorded through this installation.")}</h3><div className="usage-grid"><Metric label={t("Known spend")} value={formatMoney(locale, usage.totalKnownSpend)} /><Metric label={t("Completed tasks")} value={formatNumber(locale, usage.completedTasks)} /><Metric label={t("Input tokens")} value={formatNumber(locale, usage.inputTokens)} /><Metric label={t("Output tokens")} value={formatNumber(locale, usage.outputTokens)} /><Metric label={t("Average task")} value={usage.averageTaskCost === undefined ? "-" : formatMoney(locale, usage.averageTaskCost)} /><Metric label={t("Unpriced requests")} value={formatNumber(locale, usage.unpricedRequests)} /></div><p className="field-note">{t("The usage ledger stores model IDs, token counts, action counts, timing, status, reasoning level, and known cost. Thread history stores task commands so you can continue work. Screenshots, accessibility content, credentials, and chain-of-thought are not written.")}</p><div className="settings-divider" /><div className="settings-section-heading"><div><div className="dialog-eyebrow">{t("Recent model usage")}</div><h4>{t("Where requests are going")}</h4></div></div><div className="model-usage-list">{usage.modelUsage.length === 0 ? <div className="empty-note">{t("Usage appears after the first model request.")}</div> : usage.modelUsage.slice(0, 12).map((model) => <div className="model-usage-row" key={`${model.provider}:${model.modelId}`}><div><strong className="technical">{model.modelId}</strong><span className="technical">{model.provider} / {formatNumber(locale, model.requestCount)} {t("requests")}</span></div><strong>{formatMoney(locale, model.knownSpend)}</strong></div>)}</div><button className="danger-outline" type="button" onClick={() => { if (window.confirm(t("Reset local usage history? This cannot be undone."))) onReset(); }}>{t("Reset local usage history")}</button></div>; }
 
 function Metric({ label, value }: { label: string; value: string }) { return <div className="metric"><span>{label}</span><strong>{value}</strong></div>; }
 
@@ -699,5 +851,5 @@ function formatModelPrice(direct: number | undefined, tiers: Array<{ perToken: n
 function primaryForeground(hex: string): string { const value = hex.replace("#", ""); if (value.length !== 6) return "#0a0a0a"; const channels = [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16) / 255).map((channel) => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4); const luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]; return luminance > 0.52 ? "#0a0a0a" : "#ffffff"; }
 type ConnectionTestState = "idle" | "testing" | GatewayConnectionResult;
 
-function Glyph({ name }: { name: GlyphName }) { const paths: Record<GlyphName, string> = { activity: "M3 12h4l2-7 4 14 2-7h6", sliders: "M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4", chevron: "m7 10 5 5 5-5", arrow: "M4 12h15m-6-6 6 6-6 6", spark: "m12 3 1.5 6.5L20 12l-6.5 1.5L12 20l-1.5-6.5L4 12l6.5-2.5L12 3Z", tool: "M14.5 6.5a4 4 0 0 0-5.2 5.2L4 17l3 3 5.3-5.3a4 4 0 0 0 5.2-5.2l-2.4 2.4-2.4-2.4 1.8-2.9Z", desktop: "M4 5h16v11H4zM9 20h6M12 16v4", shield: "M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6l8-3Z", check: "m5 12 4 4L19 6", alert: "M12 4 21 20H3L12 4Zm0 6v4m0 3h.01", lock: "M6 10h12v10H6zM8 10V7a4 4 0 0 1 8 0v3", chart: "M4 19V5m0 14h16M8 16v-5m4 5V7m4 9v-8", minus: "M5 12h14", square: "M5 5h14v14H5z", restore: "M7 7h10v10H7zM7 10H5v9h9v-2", close: "M6 6l12 12M18 6 6 18" }; return <svg className="glyph" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name]} /></svg>; }
-type GlyphName = "activity" | "sliders" | "chevron" | "arrow" | "spark" | "tool" | "desktop" | "shield" | "check" | "alert" | "lock" | "chart" | "minus" | "square" | "restore" | "close";
+function Glyph({ name }: { name: GlyphName }) { const paths: Record<GlyphName, string> = { activity: "M3 12h4l2-7 4 14 2-7h6", sliders: "M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4", chevron: "m7 10 5 5 5-5", arrow: "M4 12h15m-6-6 6 6-6 6", plus: "M12 5v14M5 12h14", spark: "m12 3 1.5 6.5L20 12l-6.5 1.5L12 20l-1.5-6.5L4 12l6.5-2.5L12 3Z", tool: "M14.5 6.5a4 4 0 0 0-5.2 5.2L4 17l3 3 5.3-5.3a4 4 0 0 0 5.2-5.2l-2.4 2.4-2.4-2.4 1.8-2.9Z", desktop: "M4 5h16v11H4zM9 20h6M12 16v4", shield: "M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6l8-3Z", check: "m5 12 4 4L19 6", alert: "M12 4 21 20H3L12 4Zm0 6v4m0 3h.01", lock: "M6 10h12v10H6zM8 10V7a4 4 0 0 1 8 0v3", chart: "M4 19V5m0 14h16M8 16v-5m4 5V7m4 9v-8", minus: "M5 12h14", square: "M5 5h14v14H5z", restore: "M7 7h10v10H7zM7 10H5v9h9v-2", close: "M6 6l12 12M18 6 6 18" }; return <svg className="glyph" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name]} /></svg>; }
+type GlyphName = "activity" | "sliders" | "chevron" | "arrow" | "plus" | "spark" | "tool" | "desktop" | "shield" | "check" | "alert" | "lock" | "chart" | "minus" | "square" | "restore" | "close";

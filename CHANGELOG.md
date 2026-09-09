@@ -11,6 +11,8 @@
 - Added validated Gateway request-cost capture, live task/lifetime spend, approximate 20-step estimates, and a privacy-safe usage ledger.
 - Added a custom OpenAI-compatible endpoint path with Ollama and LM Studio presets.
 - Added the cross-platform click-through OpenUse Agent Cursor with target geometry, DPI, display, semantic-action, and reduced-motion support.
+- Added perceptible interruptible cursor travel and a short terminal hold so brief tasks do not hide their final target before it can be understood; Stop remains immediate.
+- Added local task threads, folders, task history, continuation summaries, and automatic model-transcript compaction without persisting private observations.
 - Added an x64 Windows NSIS installer containing the real .NET controller and packaged-resource resolution.
 - Added settings v2 → v3 migration, cursor geometry tests, catalog/pricing/reasoning tests, usage tests, and Windows native/preflight coverage.
 - Updated architecture, security, development, Windows, macOS, design, usage, and qualification documentation.

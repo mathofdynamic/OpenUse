@@ -37,7 +37,11 @@ interactionMethod accessibility-native, element-coordinate, vision-coordinate,
 
 The main process forwards only geometry and action state to the virtual Agent Cursor. Semantic actions therefore remain visible even if the physical pointer never moves. The Electron overlay is transparent, always-on-top, non-focusable, click-through, DPI-aware, and hidden while idle or stopped. It spans the virtual desktop so negative secondary-monitor origins are supported.
 
-Move, click, double-click, drag, scroll, and typing events use transform-based motion and short pulses. Reduced motion disables travel and ripple animation while retaining a clear target marker.
+Move, click, double-click, drag, scroll, and typing events use transform-based
+motion and short pulses. The native action is not delayed; after a terminal task
+event the final target remains visible briefly so a short task does not erase its
+own motion. Stop hides it immediately. Reduced motion disables travel and ripple
+animation while retaining a clear target marker.
 
 ## Tool surface
 

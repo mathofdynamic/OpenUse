@@ -39,3 +39,12 @@ request count, duration
 It does not store the command, screenshots, passwords, accessibility trees, private window text, file contents, or chain-of-thought. Writes are versioned, migrated defensively, atomic, and queued to avoid corrupting the store.
 
 Settings → Usage shows known total spend, completed tasks, input/output tokens, average task cost, recent model usage, and known versus unpriced requests. The wording is **OpenUse total** / **spend recorded through this OpenUse installation**, not Vercel account spend. Reset requires confirmation.
+
+## Task threads
+
+Each task belongs to the selected local thread. The Control Room provides a
+thread switcher, **New thread**, folder creation, folder assignment, and a
+history of prior task outcomes. Continuing a thread sends only its bounded,
+privacy-safe summary to the model; it does not replay screenshots or raw
+accessibility observations. Long threads are compacted automatically while the
+visible local history remains available.

@@ -17,7 +17,11 @@ declare global {
       runSelfTest(): Promise<void>;
       openMacPrivacy(area: "accessibility" | "screen-recording"): Promise<void>;
       relaunch(): Promise<void>;
-      startTask(command: string): Promise<void>;
+      startTask(command: string, threadId: string): Promise<void>;
+      createThread(): Promise<AppSnapshot>;
+      selectThread(threadId: string): Promise<AppSnapshot>;
+      createThreadFolder(name: string): Promise<AppSnapshot>;
+      moveThread(threadId: string, folderId?: string): Promise<AppSnapshot>;
       stopTask(): Promise<void>;
       refreshModelCatalog(): Promise<AppSnapshot>;
       resetUsage(): Promise<AppSnapshot>;

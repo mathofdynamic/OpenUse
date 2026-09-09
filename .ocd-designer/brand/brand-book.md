@@ -18,7 +18,7 @@ Last updated: `2026-09-05`
 - Secondary audience: contributors extending model providers and native controllers without splitting the product into OS-specific applications (`confirmed` — repository architecture and user brief).
 - User jobs: choose a model, select supported reasoning, enter a task, understand what the agent is doing, approve or deny access, stop instantly, and inspect cost and outcome (`confirmed` — v0.2 brief).
 - Environments: interactive Windows or macOS desktop session with an Electron application and native sidecar (`confirmed` — product scope).
-- Language and direction: English LTR in the current product; arbitrary task text is not persisted in telemetry (`confirmed` — implementation and security requirements).
+- Language and direction: the shared product supports English LTR and Persian RTL. Persian UI uses the bundled IRANYekanX family; technical identifiers retain explicit LTR treatment. Thread history may retain task commands for continuation, while usage telemetry remains metadata-only (`confirmed` — implementation and security requirements).
 - Accessibility: WCAG 2.2 AA target, keyboard operation, visible focus, readable contrast, Escape handling, and reduced motion (`confirmed` — product brief and OCD configuration).
 
 ## Journeys and hierarchy

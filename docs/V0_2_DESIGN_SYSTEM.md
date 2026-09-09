@@ -18,6 +18,11 @@ The renderer defines tokens for `--background`, `--surface`, `--surface-raised`,
 
 Primary foreground is selected from contrast against the user color. The primary is used for active navigation, primary actions, focus, selected model/reasoning controls, progress, active-agent state, and Agent Cursor geometry/pulses.
 
+The shared renderer supports English LTR and Persian RTL. English uses the
+bundled SF Pro Display family supplied by the project; Persian uses the bundled
+IRANYekanX family. Technical identifiers, model IDs, HEX values, and keyboard
+shortcuts retain explicit LTR treatment inside either locale.
+
 ## Material
 
 The BrowserWindow uses the platform compositor where it is reliable. macOS requests transparent under-window vibrancy. Windows uses a non-layered BrowserWindow with Electron Acrylic and `roundedCorners: true`, so the system backdrop and visible window boundary share the compositor's geometry. The renderer controls material opacity from 45% to 100% and keeps content crisp. Older Windows versions use a neutral dark surface; the blur slider remains a visual treatment control where the platform exposes a backdrop radius.

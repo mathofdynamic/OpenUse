@@ -21,6 +21,7 @@ The v0.2 product pass preserves the existing Electron/React/TypeScript, agent, p
 - searchable, provider-filtered Computer Use model selection;
 - provider-neutral reasoning controls;
 - actual Gateway request-cost capture, task spend, lifetime spend, and a privacy-safe local usage ledger;
+- per-task local threads with continuation context, folders, history, and bounded transcript compaction;
 - an optional OpenUse Agent Cursor overlay that visualizes semantic actions without moving or hijacking the physical pointer;
 - one custom OpenAI-compatible endpoint path for advanced and local models;
 - an x64 Windows NSIS installer containing the real .NET controller.
