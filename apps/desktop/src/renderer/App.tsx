@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
-import type { CSSProperties, Dispatch, KeyboardEvent as ReactKeyboardEvent, SetStateAction } from "react";
+import type { CSSProperties, Dispatch, KeyboardEvent as ReactKeyboardEvent, ReactNode, SetStateAction } from "react";
 import { MODEL_CATALOG, estimateTwentyStepCost, getCompatibilityIssues, type GatewayConnectionResult } from "@openuse/ai";
 import { defaultPermissionRecords } from "@openuse/permissions";
 import type {
@@ -406,6 +406,9 @@ export function App() {
           <button className="rail-link rail-link-active" type="button"><Glyph name="activity" /><span>{t("Control room")}</span></button>
           <button className="rail-link" type="button" disabled={isRunning} onClick={() => setSettingsOpen(true)}><Glyph name="sliders" /><span>{t("Settings")}</span></button>
         </div>
+        <ThreadRailSection thread={currentThread} folder={currentFolder} open={threadPanelOpen} disabled={isRunning} onToggle={() => setThreadPanelOpen((current) => !current)} onNew={createNewThread}>
+          {threadPanelOpen && <ThreadPanel variant="rail" snapshot={threadSnapshot} selectedFolder={folderFilter} folderFormOpen={folderFormOpen} folderName={folderNameDraft} disabled={isRunning} onFolderFilter={setFolderFilter} onFolderForm={() => setFolderFormOpen((current) => !current)} onFolderName={setFolderNameDraft} onCreateFolder={() => void createThreadFolder()} onCancelFolder={() => { setFolderFormOpen(false); setFolderNameDraft(""); }} onSelectThread={(threadId) => void selectThread(threadId)} onMoveThread={(threadId, folderId) => void moveThread(threadId, folderId)} onNew={createNewThread} />}
+        </ThreadRailSection>
         <div className="rail-spacer" />
         <div className="rail-note">
           <div className="rail-note-heading"><span className={`status-dot ${controlReady ? "status-ready" : `status-${engine.state}`}`} />{t("Local runtime")}</div>
@@ -428,9 +431,9 @@ export function App() {
 
         <div className="compact-nav" aria-label={t("Compact navigation")}><button className="compact-nav-active" type="button"><Glyph name="activity" />{t("Activity")}</button><button type="button" disabled={isRunning} onClick={() => setSettingsOpen(true)}><Glyph name="sliders" />{t("Settings")}</button></div>
 
-        <div className="thread-toolbar-wrap">
-          <ThreadToolbar thread={currentThread} folder={currentFolder} open={threadPanelOpen} onToggle={() => setThreadPanelOpen((current) => !current)} onNew={createNewThread} />
-          {threadPanelOpen && <ThreadPanel snapshot={threadSnapshot} selectedFolder={folderFilter} folderFormOpen={folderFormOpen} folderName={folderNameDraft} onFolderFilter={setFolderFilter} onFolderForm={() => setFolderFormOpen((current) => !current)} onFolderName={setFolderNameDraft} onCreateFolder={() => void createThreadFolder()} onCancelFolder={() => { setFolderFormOpen(false); setFolderNameDraft(""); }} onSelectThread={(threadId) => void selectThread(threadId)} onMoveThread={(threadId, folderId) => void moveThread(threadId, folderId)} onNew={createNewThread} />}
+        <div className="compact-thread-wrap">
+          <ThreadToolbar thread={currentThread} folder={currentFolder} open={threadPanelOpen} disabled={isRunning} onToggle={() => setThreadPanelOpen((current) => !current)} onNew={createNewThread} />
+          {threadPanelOpen && <ThreadPanel variant="compact" snapshot={threadSnapshot} selectedFolder={folderFilter} folderFormOpen={folderFormOpen} folderName={folderNameDraft} disabled={isRunning} onFolderFilter={setFolderFilter} onFolderForm={() => setFolderFormOpen((current) => !current)} onFolderName={setFolderNameDraft} onCreateFolder={() => void createThreadFolder()} onCancelFolder={() => { setFolderFormOpen(false); setFolderNameDraft(""); }} onSelectThread={(threadId) => void selectThread(threadId)} onMoveThread={(threadId, folderId) => void moveThread(threadId, folderId)} onNew={createNewThread} />}
         </div>
 
         <div className="content-wrap">
@@ -511,23 +514,38 @@ function handleRuntimeEvent(event: RuntimeEvent, setters: {
   }
 }
 
-function ThreadToolbar({ thread, folder, open, onToggle, onNew }: { thread: ThreadRecord; folder?: ThreadFolder; open: boolean; onToggle(): void; onNew(): void }) {
+function ThreadRailSection({ thread, folder, open, disabled, onToggle, onNew, children }: { thread: ThreadRecord; folder?: ThreadFolder; open: boolean; disabled?: boolean; onToggle(): void; onNew(): void; children?: ReactNode }) {
+  const { t } = useTranslation();
+  return <section className={`thread-rail-section ${open ? "thread-rail-section-open" : ""}`} aria-label={t("Threads")}>
+    <div className="thread-rail-header"><div className="rail-label">{t("Threads")}</div><button className="thread-rail-new" type="button" aria-label={t("New thread")} disabled={disabled} onClick={onNew}><Glyph name="plus" /></button></div>
+    <button className="thread-rail-current" type="button" aria-haspopup="dialog" aria-expanded={open} disabled={disabled} onClick={onToggle}>
+      <span className="thread-rail-current-dot" aria-hidden="true" />
+      <span className="thread-rail-copy"><strong>{thread.title}</strong><small>{folder?.name ?? t("Unfiled")}</small></span>
+      <Glyph name="chevron" />
+    </button>
+    {children}
+  </section>;
+}
+
+function ThreadToolbar({ thread, folder, open, disabled, onToggle, onNew }: { thread: ThreadRecord; folder?: ThreadFolder; open: boolean; disabled?: boolean; onToggle(): void; onNew(): void }) {
   const { t } = useTranslation();
   return <div className="thread-toolbar" aria-label={t("Thread management")}>
-    <button className="thread-switcher-trigger" type="button" aria-haspopup="dialog" aria-expanded={open} onClick={onToggle}>
+    <button className="thread-switcher-trigger" type="button" aria-haspopup="dialog" aria-expanded={open} disabled={disabled} onClick={onToggle}>
       <span className="thread-switcher-icon"><Glyph name="activity" /></span>
       <span className="thread-switcher-copy"><small>{t("Thread")}</small><strong>{thread.title}</strong><em>{folder?.name ?? t("Unfiled")}</em></span>
       <Glyph name="chevron" />
     </button>
-    <button className="thread-new-button" type="button" onClick={onNew}><Glyph name="plus" />{t("New thread")}</button>
+    <button className="thread-new-button" type="button" disabled={disabled} onClick={onNew}><Glyph name="plus" />{t("New thread")}</button>
   </div>;
 }
 
-function ThreadPanel({ snapshot, selectedFolder, folderFormOpen, folderName, onFolderFilter, onFolderForm, onFolderName, onCreateFolder, onCancelFolder, onSelectThread, onMoveThread, onNew }: {
+function ThreadPanel({ variant, snapshot, selectedFolder, folderFormOpen, folderName, disabled, onFolderFilter, onFolderForm, onFolderName, onCreateFolder, onCancelFolder, onSelectThread, onMoveThread, onNew }: {
+  variant: "rail" | "compact";
   snapshot: ThreadSnapshot;
   selectedFolder: string;
   folderFormOpen: boolean;
   folderName: string;
+  disabled?: boolean;
   onFolderFilter(folderId: string): void;
   onFolderForm(): void;
   onFolderName(value: string): void;
@@ -540,8 +558,8 @@ function ThreadPanel({ snapshot, selectedFolder, folderFormOpen, folderName, onF
   const { locale, t } = useTranslation();
   const visibleThreads = snapshot.threads.filter((thread) => selectedFolder === "all" || thread.folderId === selectedFolder);
   const folderOptions: ThemedSelectOption[] = [{ value: "none", label: t("No folder") }, ...snapshot.folders.map((folder) => ({ value: folder.id, label: folder.name }))];
-  return <section className="thread-panel" role="dialog" aria-label={t("Threads")}>
-    <div className="thread-panel-header"><div><div className="dialog-eyebrow">{t("Threads")}</div><strong>{t("Continue work without losing the thread.")}</strong></div><button className="secondary-action thread-folder-button" type="button" onClick={onFolderForm}><Glyph name="plus" />{t("New folder")}</button></div>
+  return <section className={`thread-panel thread-panel-${variant}`} role="dialog" aria-label={t("Threads")}>
+    <div className="thread-panel-header"><div><div className="dialog-eyebrow">{t("Threads")}</div><strong>{t("Continue work without losing the thread.")}</strong></div><button className="secondary-action thread-folder-button" type="button" disabled={disabled} onClick={onFolderForm}><Glyph name="plus" />{t("New folder")}</button></div>
     {folderFormOpen && <form className="thread-folder-form" onSubmit={(event) => { event.preventDefault(); onCreateFolder(); }}><input autoFocus value={folderName} onChange={(event) => onFolderName(event.target.value)} placeholder={t("Folder name")} aria-label={t("Folder name")} maxLength={80} /><button className="primary-action" type="submit" disabled={!folderName.trim()}>{t("Create folder")}</button><button className="secondary-action" type="button" onClick={onCancelFolder}>{t("Cancel")}</button></form>}
     <div className="thread-folder-tabs" role="tablist" aria-label={t("Thread folders")}><button className={selectedFolder === "all" ? "thread-folder-tab-active" : ""} type="button" onClick={() => onFolderFilter("all")}>{t("All threads")}</button>{snapshot.folders.map((folder) => <button className={selectedFolder === folder.id ? "thread-folder-tab-active" : ""} type="button" key={folder.id} onClick={() => onFolderFilter(folder.id)}>{folder.name}</button>)}</div>
     <div className="thread-list">{visibleThreads.length === 0 ? <div className="empty-note">{t("No threads in this folder.")}</div> : visibleThreads.map((thread) => {
@@ -551,7 +569,7 @@ function ThreadPanel({ snapshot, selectedFolder, folderFormOpen, folderName, onF
         <ThemedSelect className="thread-folder-select" value={thread.folderId ?? "none"} options={folderOptions} ariaLabel={`${t("Move thread")} ${thread.title}`} onChange={(value) => onMoveThread(thread.id, value)} />
       </div>;
     })}</div>
-    <div className="thread-panel-footer"><span>{t("{count} threads", { count: snapshot.threads.length })}</span><button className="thread-panel-new-link" type="button" onClick={onNew}>{t("New thread")}</button></div>
+    <div className="thread-panel-footer"><span>{t("{count} threads", { count: snapshot.threads.length })}</span><button className="thread-panel-new-link" type="button" disabled={disabled} onClick={onNew}>{t("New thread")}</button></div>
   </section>;
 }
 
