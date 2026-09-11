@@ -15,6 +15,12 @@ flowchart TD
     Agent --> Provider[Provider-neutral ModelProvider]
     Provider --> Gateway[Vercel AI Gateway]
     Provider --> Custom[Custom OpenAI-compatible endpoint]
+    Main --> Named[NamedProviderManager]
+    Named --> Codex[Codex CLI subscription]
+    Named --> Claude[Claude Code CLI subscription]
+    Named --> OpenCode[OpenCode CLI subscription]
+    Named --> MCP[Per-task localhost MCP bridge]
+    MCP --> Agent
     Agent --> Tools[Typed Computer Use tools]
     Tools --> Policy[Permission and risk layer]
     Policy --> Controller[ComputerController]
@@ -32,7 +38,7 @@ flowchart TD
 - `packages/permissions`: app-level access, session approvals, risk classification, and high-risk approval hooks.
 - `packages/ai`: Gateway catalog parsing/cache integration, Gateway provider, custom OpenAI-compatible provider, pricing, reasoning compatibility, and cost metadata validation. It knows nothing about Windows or macOS.
 - `packages/agent`: bounded manual loop, tool schemas, observation/action ordering, cancellation, concise events, and cursor telemetry emission.
-- `apps/desktop`: composition root, IPC, settings migration, secure storage, usage persistence, overlay lifecycle, and shared renderer.
+- `apps/desktop`: composition root, IPC, settings migration, secure storage, usage persistence, overlay lifecycle, shared renderer, named subscription lifecycle, and the guarded MCP bridge.
 - `native/windows`: UI Automation, Win32 input/capture, per-monitor DPI, and Windows target geometry.
 - `native/macos`: AXUIElement/AppKit/CoreGraphics actions, capture, permissions, and global display-point geometry.
 
@@ -41,6 +47,16 @@ flowchart TD
 The agent performs one provider request at a time, executes returned tools serially, observes again, and continues until `computer_finish`, cancellation, an error, or the bounded action limit. After every model request the main runtime records token usage and, when supplied and validated by Gateway metadata, the actual request cost. A deduplication key prevents a repeated runtime event from double-counting a request.
 
 The native sidecar is a child process using private JSON-lines stdin/stdout. It does not open a listener or expose a general shell. Stop aborts the provider request, rejects pending protocol work, sends the internal cancellation message, hides the cursor, and leaves the sidecar reusable after its bounded action drains.
+
+## Named subscription providers
+
+Codex, Claude Code, and OpenCode are local authenticated runtimes, not alternate API-key implementations. The main process checks the installed executable and its provider-owned auth status command. It never reads, imports, or displays provider session credentials. A task starts an ephemeral provider process and gives it a random bearer-protected `127.0.0.1` MCP endpoint.
+
+The MCP bridge exposes only the existing typed `computer_*` tools. Calls still pass through OpenUse's Zod validation, application permissions, high-risk approval rules, cancellation, native controller, and cursor telemetry. The provider can observe and act only through that bridge; it receives no shell, PowerShell, unrestricted filesystem, credential, or hidden remote-control tool.
+
+This follows the useful T3 Code boundary: orchestration and lifecycle stay in the host, while each provider adapter owns its authenticated runtime. OpenUse keeps the computer-use policy in one shared agent/controller path so provider choice does not create three different desktop products. Provider sessions are not persisted by OpenUse. Thread continuation is passed as a bounded summary and the current desktop is always re-observed.
+
+Health checks are read-only. A missing CLI is reported as `not-installed`, an installed but logged-out CLI as `not-authenticated`, and an unavailable auth command as `error`. A model ID is optional because the provider's own default is valid; OpenCode and custom/local runtimes report cost as unknown unless trustworthy metadata is supplied.
 
 ## Task threads and compaction
 

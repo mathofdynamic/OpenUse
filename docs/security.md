@@ -9,10 +9,13 @@ Computer Use is powerful. OpenUse keeps the model inside a typed, local runtime 
 - The renderer can submit a key for encryption but cannot read it back; there is no `getApiKey` IPC method.
 - Keys are not written to localStorage, source, Git, logs, crash metadata, model-visible messages, or qualification evidence.
 - Custom endpoint URLs are limited to HTTP(S) settings and are treated as user configuration, not as a shell or filesystem capability.
+- Codex, Claude Code, and OpenCode subscription credentials stay inside their provider-owned local authentication stores. OpenUse invokes the installed CLI's documented version/auth status and task commands; it does not copy, decrypt, or persist subscription tokens.
+- Each named-provider task gets a fresh random bearer token and a loopback-only MCP server. Temporary provider configuration is written with restrictive permissions and removed after the task. Provider output is not written to the usage ledger or logs.
 
 ## Runtime policy
 
 - The model can call only the typed Computer Use tools.
+- Named provider runtimes receive only the OpenUse MCP tool allowlist. Shell, PowerShell, filesystem, browser, built-in computer-control, and arbitrary network tools are disabled or denied where the provider exposes those controls; OpenUse fails closed if the guarded completion tool is not used.
 - There is no shell, PowerShell, arbitrary filesystem API, browser extension, network listener, or remote-control tool.
 - Unknown applications default to `ASK`; `Password Manager` is seeded as `DENY`.
 - `Allow Once` is session-scoped. `Always Allow` is persistent only for ordinary application control.

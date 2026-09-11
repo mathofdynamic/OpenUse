@@ -20,7 +20,12 @@ This record separates verified Windows build/packaging/native evidence from real
 | Windows installer | PASS | `dist/windows/OpenUse-Setup-0.2.0-x64.exe` |
 | Installed launch | PASS | installed `OpenUse.exe` ran with title `OpenUse`, responsive main process, renderer process, and `--app-path=...\\resources\\app.asar` |
 | Packaged controller | PASS | installed `resources/native/windows/OpenUse.WindowsController.exe` plus `.dll`, `.deps.json`, and `.runtimeconfig.json`; packaged sidecar smoke test passed |
-| Installer integrity | RECORDED | SHA-256 `24EB50A0D72527D595CD9829A7579AB4C17C62203B3508D19BCBC88FC26EC765` |
+| Installer integrity | RECORDED | SHA-256 `2E039BA92949C23BF09B47360A8F4EE214EF1D1FC13BB5FCA73AFD72116EEEF6` |
+| Codex subscription probe | PASS | local `codex` `0.154.0`; provider-owned auth status reported authenticated |
+| Claude Code subscription probe | PASS | local Claude Code `2.1.202`; provider-owned auth status reported authenticated |
+| OpenCode subscription probe | NOT AVAILABLE | the host's installed `opencode-ai` binary was not a runnable Windows executable and no usable `opencode` command was on `PATH` |
+| Codex named-runtime MCP smoke | PASS | real authenticated Codex CLI completed `computer_list_apps` then `computer_finish` through OpenUse's bearer-protected localhost bridge; 2 actions, token usage returned |
+| Claude named-runtime MCP smoke | BLOCKED | CLI connected to the MCP server but remained in API retry and completed no tool call in the available window |
 
 ## Real GUI qualification status
 

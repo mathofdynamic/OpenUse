@@ -17,6 +17,8 @@ pnpm verify
 
 `pnpm dev` starts the Vite renderer and Electron shell. Development controller resolution uses `native\windows\publish\OpenUse.WindowsController.exe` on Windows and `native/macos/.build/release/OpenUseMacController` on macOS. `OPENUSE_NATIVE_ENGINE_PATH` is an explicit development/test override only.
 
+Named subscription providers are implemented in `apps/desktop/src/main/named-provider-runtime.ts`. The manager probes `codex`, `claude`, and `opencode` without mutating authentication, starts one ephemeral local runtime per task, and tears it down on completion or Stop. `named-provider-mcp.ts` exposes the existing guarded `computer_*` contract over a random-token localhost endpoint. Do not move provider credentials or desktop policy into the renderer.
+
 ## Windows
 
 ```powershell
