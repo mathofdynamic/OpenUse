@@ -18,7 +18,7 @@ async function temporarySettingsFile(): Promise<string> {
   return join(directory, "settings.json");
 }
 
-describe("settings schema v4", () => {
+describe("settings schema v5", () => {
   it("migrates v2 without resetting the model or permissions", async () => {
     const path = await temporarySettingsFile();
     await writeFile(path, JSON.stringify({ version: 2, provider: "vercel-gateway", modelId: "google/gemini-3-flash", permissions: defaultPermissionRecords() }));
@@ -26,12 +26,12 @@ describe("settings schema v4", () => {
     const store = new SettingsStore(path);
     await store.initialize();
 
-    expect(store.persisted.version).toBe(4);
+    expect(store.persisted.version).toBe(5);
     expect(store.persisted.locale).toBe("en");
     expect(store.persisted.modelId).toBe("google/gemini-3-flash");
     expect(store.persisted.permissions).toHaveLength(defaultPermissionRecords().length);
     expect(store.persisted.primaryColor).toBe("#c8f36a");
-    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({ version: 4, locale: "en", modelId: "google/gemini-3-flash" });
+    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({ version: 5, locale: "en", modelId: "google/gemini-3-flash" });
   });
 
   it("preserves a valid Persian locale while migrating v3", async () => {
@@ -41,9 +41,9 @@ describe("settings schema v4", () => {
     const store = new SettingsStore(path);
     await store.initialize();
 
-    expect(store.persisted.version).toBe(4);
+    expect(store.persisted.version).toBe(5);
     expect(store.persisted.locale).toBe("fa");
-    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({ version: 4, locale: "fa" });
+    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({ version: 5, locale: "fa" });
   });
 
   it("sanitizes malformed v3 appearance and custom-provider values", async () => {
@@ -100,5 +100,40 @@ describe("settings schema v4", () => {
     await reloaded.initialize();
     expect(reloaded.persisted.primaryColor).toBe("#8bd5ff");
     expect(reloaded.persisted.locale).toBe("fa");
+  });
+
+  it("migrates subscription provider settings to schema v5 without trusting malformed values", async () => {
+    const path = await temporarySettingsFile();
+    await writeFile(path, JSON.stringify({
+      version: 4,
+      provider: "codex",
+      modelId: "openai/gpt-5.4",
+      permissions: defaultPermissionRecords(),
+      namedProviders: {
+        codex: { executablePath: "  C:\\Users\\matho\\AppData\\Roaming\\npm\\codex.cmd  ", modelId: "  o3  " },
+        claude: { executablePath: 42, modelId: null },
+      },
+    }));
+
+    const store = new SettingsStore(path);
+    await store.initialize();
+
+    expect(store.persisted.version).toBe(5);
+    expect(store.persisted.provider).toBe("codex");
+    expect(store.persisted.namedProviders.codex).toEqual({ executablePath: "C:\\Users\\matho\\AppData\\Roaming\\npm\\codex.cmd", modelId: "o3" });
+    expect(store.persisted.namedProviders.claude).toEqual({ executablePath: "", modelId: "" });
+    expect(store.persisted.namedProviders.opencode).toEqual({ executablePath: "", modelId: "" });
+  });
+
+  it("persists sanitized per-provider executable and model overrides", async () => {
+    const path = await temporarySettingsFile();
+    const store = new SettingsStore(path);
+    await store.initialize();
+
+    await store.setNamedProvider("claude", { executablePath: "  claude.cmd  ", modelId: "  claude-sonnet  " });
+
+    const reloaded = new SettingsStore(path);
+    await reloaded.initialize();
+    expect(reloaded.persisted.namedProviders.claude).toEqual({ executablePath: "claude.cmd", modelId: "claude-sonnet" });
   });
 });

@@ -24,13 +24,14 @@ The v0.2 product pass preserves the existing Electron/React/TypeScript, agent, p
 - per-task local threads with continuation context, folders, history, and bounded transcript compaction;
 - an optional OpenUse Agent Cursor overlay that visualizes semantic actions without moving or hijacking the physical pointer;
 - one custom OpenAI-compatible endpoint path for advanced and local models;
+- named local subscription runtimes for Codex, Claude Code, and OpenCode;
 - an x64 Windows NSIS installer containing the real .NET controller.
 
 The live Gateway catalog contained 373 entries on 2026-09-05. The parser classified 251 language models and 155 Computer Use-compatible models at that point; the catalog is intentionally refreshed at runtime rather than treated as permanent source code.
 
 ## Quick start
 
-Requirements: Node.js 20 or newer, pnpm 10.14.0, and a Vercel AI Gateway key for Gateway-backed tasks.
+Requirements: Node.js 20 or newer and pnpm 10.14.0. Gateway-backed tasks need a Vercel AI Gateway key. Codex, Claude Code, and OpenCode tasks use the corresponding authenticated local CLI subscription instead of a Gateway key.
 
 Windows:
 
@@ -49,6 +50,16 @@ pnpm dev
 ```
 
 Configure the provider, key, compatible model, and permissions in **Settings**. The key is encrypted through Electron `safeStorage` in the main process and is never returned to the renderer.
+
+For named subscriptions, install and authenticate the provider with its own CLI, then choose it in **Settings > AI** and use **Check connection**:
+
+```text
+Codex:     codex login
+Claude:    claude auth login
+OpenCode:  opencode auth login
+```
+
+The optional model ID and executable path are passed to that local runtime. OpenCode must be installed separately; OpenUse does not install software automatically.
 
 ## Packaging
 
@@ -78,6 +89,8 @@ OpenUse Electron / React
         +-- ComputerUseAgent
         |       +-- Vercel AI Gateway catalog/provider
         |       +-- custom OpenAI-compatible provider
+        |       +-- Codex / Claude Code / OpenCode named subscription adapters
+        |       +-- per-task localhost MCP bridge exposing guarded computer tools
         |       +-- typed tools and provider-neutral reasoning
         |       +-- permissions and high-risk approvals
         |
@@ -112,9 +125,9 @@ pnpm dist:macos
 ## Repository layout
 
 ```text
-apps/desktop          Electron shell, IPC, settings, usage, cursor, and React UI
+apps/desktop          Electron shell, IPC, settings, usage, cursor, React UI, and named runtimes
 packages/agent        Closed-loop Computer Use agent
-packages/ai           Model catalog, Gateway/custom providers, pricing, reasoning
+packages/ai           Model catalog, Gateway/custom model providers, pricing, reasoning
 packages/computer     OS-neutral controller contract and adapters
 packages/permissions  Application and action permission engine
 packages/protocol     Shared JSON-lines protocol types

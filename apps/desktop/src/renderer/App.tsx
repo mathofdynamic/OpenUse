@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties, Dispatch, KeyboardEvent as ReactKeyboardEvent, ReactNode, SetStateAction } from "react";
-import { MODEL_CATALOG, estimateTwentyStepCost, getCompatibilityIssues, type GatewayConnectionResult } from "@openuse/ai";
+import { MODEL_CATALOG, estimateTwentyStepCost, getCompatibilityIssues, namedProviderModelDefinition, type GatewayConnectionResult } from "@openuse/ai";
 import { defaultPermissionRecords } from "@openuse/permissions";
 import type {
   AgentStatus,
@@ -21,6 +21,8 @@ import type {
   ThreadFolder,
   ThreadRecord,
   ThreadSnapshot,
+  NamedProviderId,
+  NamedProviderStatus,
   UsageSummary,
 } from "@openuse/shared";
 import { formatDuration, formatMoney, formatNumber, formatPricePerMillion, localizeRuntimeText, platformName, providerLabel, reasoningLabel, starterCommands, statusLabel, translate } from "./i18n";
@@ -51,6 +53,7 @@ const emptySettings: AppSettings = {
   backgroundOpacity: 0.78,
   showAgentCursor: true,
   customProvider: { baseUrl: "http://localhost:11434/v1", modelId: "llama3.2-vision", apiKeyConfigured: false, capabilities: { toolCalling: false, vision: false, reasoning: false } },
+  namedProviders: { codex: { executablePath: "", modelId: "" }, claude: { executablePath: "", modelId: "" }, opencode: { executablePath: "", modelId: "" } },
 };
 const emptyUsage: UsageSummary = {
   totalKnownSpend: 0,
@@ -69,6 +72,11 @@ const emptyThreadSnapshot: ThreadSnapshot = {
   folders: [],
   threads: [{ id: "preview-thread", title: "New thread", createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(), tasks: [] }],
 };
+const emptyNamedProviders: NamedProviderStatus[] = [
+  { id: "codex", displayName: "Codex", state: "not-installed", detail: "Browser preview does not run local subscription CLIs." },
+  { id: "claude", displayName: "Claude", state: "not-installed", detail: "Browser preview does not run local subscription CLIs." },
+  { id: "opencode", displayName: "OpenCode", state: "not-installed", detail: "Browser preview does not run local subscription CLIs." },
+];
 
 const emptySnapshot: AppSnapshot = {
   settings: { ...emptySettings, permissions: defaultPermissionRecords() },
@@ -77,6 +85,7 @@ const emptySnapshot: AppSnapshot = {
   modelCatalog: { models: MODEL_CATALOG, status: emptyCatalogStatus },
   usage: emptyUsage,
   threads: emptyThreadSnapshot,
+  namedProviders: emptyNamedProviders,
 };
 
 let browserPreviewSnapshot = emptySnapshot;
@@ -91,6 +100,18 @@ const browserPreviewBridge: Window["openuse"] = {
     browserPreviewSnapshot = { ...browserPreviewSnapshot, settings: { ...browserPreviewSnapshot.settings, provider } };
     return browserPreviewSnapshot;
   },
+  setNamedProvider: async (provider, patch) => {
+    browserPreviewSnapshot = {
+      ...browserPreviewSnapshot,
+      settings: {
+        ...browserPreviewSnapshot.settings,
+        provider,
+        namedProviders: { ...browserPreviewSnapshot.settings.namedProviders, [provider]: { ...browserPreviewSnapshot.settings.namedProviders[provider], ...patch } },
+      },
+    };
+    return browserPreviewSnapshot;
+  },
+  refreshNamedProvider: async () => browserPreviewSnapshot,
   setLocale: async (nextLocale) => {
     browserPreviewSnapshot = { ...browserPreviewSnapshot, settings: { ...browserPreviewSnapshot.settings, locale: nextLocale } };
     return browserPreviewSnapshot;
@@ -158,6 +179,7 @@ export function App() {
   const [catalogStatus, setCatalogStatus] = useState<ModelCatalogStatus>(emptyCatalogStatus);
   const [usage, setUsage] = useState<UsageSummary>(emptyUsage);
   const [threadSnapshot, setThreadSnapshot] = useState<ThreadSnapshot>(emptyThreadSnapshot);
+  const [namedProviderStatuses, setNamedProviderStatuses] = useState<NamedProviderStatus[]>(emptyNamedProviders);
   const [selfTest, setSelfTest] = useState<EngineSelfTestResult | undefined>();
   const [entries, setEntries] = useState<TimelineEntry[]>([]);
   const [command, setCommand] = useState("");
@@ -194,6 +216,7 @@ export function App() {
     setCatalogStatus(snapshot.modelCatalog.status);
     setUsage(snapshot.usage);
     setThreadSnapshot(snapshot.threads);
+    setNamedProviderStatuses(snapshot.namedProviders);
   }
 
   useEffect(() => {
@@ -225,6 +248,9 @@ export function App() {
         capabilities: settings.customProvider.capabilities,
       } satisfies ModelDefinition;
     }
+    if (settings.provider === "codex" || settings.provider === "claude" || settings.provider === "opencode") {
+      return namedProviderModelDefinition(settings.provider, settings.namedProviders[settings.provider].modelId);
+    }
     return models.find((model) => model.id === settings.modelId) ?? {
       id: settings.modelId,
       label: settings.modelId,
@@ -241,7 +267,11 @@ export function App() {
   const starterCommandList = starterCommands(locale, engine.platform);
   const nativePermissionsReady = engine.platform !== "darwin" || selfTest?.ok === true;
   const controlReady = engine.state === "ready" && nativePermissionsReady;
-  const providerConfigured = settings.provider === "vercel-gateway" ? settings.apiKeyConfigured : Boolean(settings.customProvider.baseUrl && settings.customProvider.modelId);
+  const providerConfigured = settings.provider === "vercel-gateway"
+    ? settings.apiKeyConfigured
+      : settings.provider === "custom-openai-compatible"
+        ? Boolean(settings.customProvider.baseUrl && settings.customProvider.modelId)
+        : snapshotNamedProviderReady(settings.provider, namedProviderStatuses);
   const canRun = Boolean(command.trim()) && !isRunning && providerConfigured && compatible && engineCanStart && nativePermissionsReady;
   const effectiveReasoning = activeModel.capabilities.reasoning && activeModel.capabilities.reasoningEfforts?.includes(settings.reasoningEffort)
     ? settings.reasoningEffort
@@ -258,7 +288,7 @@ export function App() {
     if (!canRun) {
       if (!providerConfigured) {
         setSettingsOpen(true);
-        setError(settings.provider === "vercel-gateway" ? "Add an AI Gateway key in Settings to run a task." : "Configure the custom endpoint before running a task.");
+        setError(settings.provider === "vercel-gateway" ? "Add an AI Gateway key in Settings to run a task." : settings.provider === "custom-openai-compatible" ? "Configure the custom endpoint before running a task." : "Install and authenticate the selected subscription, then use Check connection in Settings.");
       } else if (!engineCanStart) setError(engine.detail || `${platformLabel} control is not available on this host.`);
       else if (!nativePermissionsReady) setError(selfTest?.detail ?? "Grant the required macOS privacy permissions before running Computer Use.");
       else if (!compatible) setError(`Choose a model with ${getCompatibilityIssues(activeModel).join(" and ")} for Computer Use.`);
@@ -301,6 +331,13 @@ export function App() {
       setCustomKeyDraft("");
       setError(undefined);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Custom provider settings could not be saved."); }
+  }
+
+  async function saveNamedProvider(provider: NamedProviderId, input: { executablePath: string; modelId: string }) {
+    try {
+      applySnapshot(await runtimeApi.setNamedProvider(provider, input));
+      setError(undefined);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Subscription provider settings could not be saved."); }
   }
 
   async function testConnection(modelId: string) {
@@ -422,7 +459,7 @@ export function App() {
           <div className="topbar-brand"><div className="brand-mark small" aria-hidden="true"><span /></div><div><div className="topbar-brand-name">OpenUse</div><div className="topbar-brand-caption">{t("Control room")}</div></div></div>
           <div className="topbar-context"><span className={`status-dot ${controlReady ? "status-ready" : `status-${engine.state}`}`} /><span>{controlReady ? t("{platform} control ready", { platform: platformLabel }) : engine.platform === "darwin" && selfTest && !selfTest.ok ? t("{platform} permission required", { platform: platformLabel }) : engine.state === "unsupported" ? t("{platform} control unavailable", { platform: platformLabel }) : t("{platform} control offline", { platform: platformLabel })}</span></div>
           <div className="topbar-actions">
-            <ModelPicker models={models} value={settings.provider === "vercel-gateway" ? settings.modelId : settings.customProvider.modelId} onSelect={(modelId) => { if (settings.provider === "vercel-gateway") void runtimeApi.setModel(modelId).then(applySnapshot); }} compact disabled={isRunning || settings.provider !== "vercel-gateway"} />
+            {settings.provider === "vercel-gateway" ? <ModelPicker models={models} value={settings.modelId} onSelect={(modelId) => void runtimeApi.setModel(modelId).then(applySnapshot)} compact disabled={isRunning} /> : <div className="topbar-provider-model"><strong>{activeModel.label}</strong><small>{providerLabel(locale, settings.provider)}</small></div>}
             <div className="topbar-reasoning"><span>{t("Reasoning")}</span><ReasoningSelect model={activeModel} value={effectiveReasoning} onChange={updateReasoning} compact disabled={isRunning} /></div>
             <SpendPill taskCost={taskCost} total={usage.totalKnownSpend} />
             <button className="icon-button" type="button" aria-label={t("Open Settings")} disabled={isRunning} onClick={() => setSettingsOpen(true)}><Glyph name="sliders" /></button>
@@ -455,7 +492,7 @@ export function App() {
       </main>
 
       {permission && <PermissionDialog request={permission} onDecision={(decision) => { void runtimeApi.decidePermission(permission.id, decision); setPermission(undefined); }} onStop={() => { setPermission(undefined); void stopTask(); }} />}
-      {settingsOpen && <SettingsDialog settings={settings} models={models} catalogStatus={catalogStatus} usage={usage} apiKeyDraft={apiKeyDraft} customKeyDraft={customKeyDraft} onApiKeyChange={setApiKeyDraft} onCustomKeyChange={setCustomKeyDraft} onClose={() => setSettingsOpen(false)} onSaveGateway={(modelId) => void saveGateway(modelId)} onSaveCustom={saveCustomProvider} onTestConnection={(modelId) => void testConnection(modelId)} connectionTest={connectionTest} onProvider={(provider) => void runtimeApi.setProvider(provider).then(applySnapshot)} onLocale={updateLocale} onReasoning={updateReasoning} onAppearance={updateAppearance} onRefreshModels={() => void runtimeApi.refreshModelCatalog().then(applySnapshot)} onResetUsage={() => void runtimeApi.resetUsage().then(applySnapshot)} onPermissionChange={(appName, level, appIdentity) => void updatePermission(appName, level, appIdentity)} onRunSelfTest={() => void runtimeApi.runSelfTest()} onOpenMacPrivacy={(area) => void runtimeApi.openMacPrivacy(area)} />}
+      {settingsOpen && <SettingsDialog settings={settings} models={models} catalogStatus={catalogStatus} usage={usage} namedProviders={namedProviderStatuses} apiKeyDraft={apiKeyDraft} customKeyDraft={customKeyDraft} onApiKeyChange={setApiKeyDraft} onCustomKeyChange={setCustomKeyDraft} onClose={() => setSettingsOpen(false)} onSaveGateway={(modelId) => void saveGateway(modelId)} onSaveCustom={saveCustomProvider} onSaveNamed={saveNamedProvider} onTestConnection={(modelId) => void testConnection(modelId)} connectionTest={connectionTest} onProvider={(provider) => void runtimeApi.setProvider(provider).then(applySnapshot)} onLocale={updateLocale} onReasoning={updateReasoning} onAppearance={updateAppearance} onRefreshModels={() => void runtimeApi.refreshModelCatalog().then(applySnapshot)} onRefreshNamed={(provider) => void runtimeApi.refreshNamedProvider(provider).then(applySnapshot)} onResetUsage={() => void runtimeApi.resetUsage().then(applySnapshot)} onPermissionChange={(appName, level, appIdentity) => void updatePermission(appName, level, appIdentity)} onRunSelfTest={() => void runtimeApi.runSelfTest()} onOpenMacPrivacy={(area) => void runtimeApi.openMacPrivacy(area)} />}
       </div>
     </div>
     </LocaleContext.Provider>
@@ -593,7 +630,65 @@ function ActionEntry({ action }: { action: TimelineAction }) { const { locale } 
 
 function PermissionDialog({ request, onDecision, onStop }: { request: PermissionRequest; onDecision(decision: PermissionDecision): void; onStop(): void }) { const { locale, t } = useTranslation(); const denyRef = useRef<HTMLButtonElement>(null); const persistentApprovalAllowed = request.risk === "read" || request.risk === "interaction"; useEffect(() => { denyRef.current?.focus(); const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onStop(); }; window.addEventListener("keydown", onKeyDown); return () => window.removeEventListener("keydown", onKeyDown); }, [onStop]); return <div className="modal-backdrop permission-backdrop" role="presentation"><div className="permission-dialog" role="alertdialog" aria-modal="true" aria-labelledby="permission-title" aria-describedby="permission-description"><div className="permission-icon"><Glyph name="shield" /></div><div className="dialog-eyebrow">{t("Permission required")}</div><h2 id="permission-title">{t("Allow OpenUse to control {app}?", { app: request.appName })}</h2><p id="permission-description">{t("OpenUse wants to")} <strong>{localizeRuntimeText(locale, request.actionSummary)}</strong>. {t("The runtime classified this as")} <span className="risk-label">{t(request.risk)}</span>.</p><div className="permission-reason"><span>{t("Why you're seeing this")}</span><p>{localizeRuntimeText(locale, request.reason)}</p></div><div className="dialog-actions"><button ref={denyRef} className="secondary-action" type="button" onClick={() => onDecision("deny")}>{t("Deny")}</button><button className="secondary-action" type="button" onClick={() => onDecision("allow-once")}>{t("Allow once")}</button>{persistentApprovalAllowed && <button className="primary-action" type="button" onClick={() => onDecision("always-allow")}>{t("Always allow")}</button>}<button className="stop-dialog-action" type="button" onClick={onStop}>{t("Stop task")}</button></div></div></div>; }
 
-function SettingsDialog({ settings, models, catalogStatus, usage, apiKeyDraft, customKeyDraft, onApiKeyChange, onCustomKeyChange, onClose, onSaveGateway, onSaveCustom, onTestConnection, connectionTest, onProvider, onLocale, onReasoning, onAppearance, onRefreshModels, onResetUsage, onPermissionChange, onRunSelfTest, onOpenMacPrivacy }: {
+function isNamedProvider(provider: AppSettings["provider"]): provider is NamedProviderId {
+  return provider === "codex" || provider === "claude" || provider === "opencode";
+}
+
+function snapshotNamedProviderReady(provider: NamedProviderId, statuses: NamedProviderStatus[]): boolean {
+  return statuses.find((status) => status.id === provider)?.state === "ready";
+}
+
+function reasoningModelForSettings(settings: AppSettings, models: ModelDefinition[]): ModelDefinition | undefined {
+  if (settings.provider === "vercel-gateway") return models.find((model) => model.id === settings.modelId);
+  if (settings.provider === "custom-openai-compatible") return { id: settings.customProvider.modelId, label: settings.customProvider.modelId, provider: settings.provider, capabilities: settings.customProvider.capabilities };
+  return namedProviderModelDefinition(settings.provider, settings.namedProviders[settings.provider].modelId);
+}
+
+function SettingsDialog({ settings, models, catalogStatus, usage, namedProviders, apiKeyDraft, customKeyDraft, onApiKeyChange, onCustomKeyChange, onClose, onSaveGateway, onSaveCustom, onSaveNamed, onTestConnection, connectionTest, onProvider, onLocale, onReasoning, onAppearance, onRefreshModels, onRefreshNamed, onResetUsage, onPermissionChange, onRunSelfTest, onOpenMacPrivacy }: {
+  settings: AppSettings;
+  models: ModelDefinition[];
+  catalogStatus: ModelCatalogStatus;
+  usage: UsageSummary;
+  namedProviders: NamedProviderStatus[];
+  apiKeyDraft: string;
+  customKeyDraft: string;
+  onApiKeyChange(value: string): void;
+  onCustomKeyChange(value: string): void;
+  onClose(): void;
+  onSaveGateway(modelId: string): void;
+  onSaveCustom(input: { baseUrl: string; modelId: string; capabilities: { toolCalling: boolean; vision: boolean; reasoning: boolean } }): void;
+  onSaveNamed(provider: NamedProviderId, input: { executablePath: string; modelId: string }): void;
+  onTestConnection(modelId: string): void;
+  connectionTest: ConnectionTestState;
+  onProvider(provider: AppSettings["provider"]): void;
+  onLocale(locale: Locale): void;
+  onReasoning(value: ReasoningEffort): void;
+  onAppearance(patch: { primaryColor?: string; backgroundBlur?: number; backgroundOpacity?: number; showAgentCursor?: boolean }): void;
+  onRefreshModels(): void;
+  onRefreshNamed(provider: NamedProviderId): void;
+  onResetUsage(): void;
+  onPermissionChange(appName: string, level: PermissionLevel, appIdentity?: string): void;
+  onRunSelfTest(): void;
+  onOpenMacPrivacy(area: "accessibility" | "screen-recording"): void;
+}) {
+  const [section, setSection] = useState<SettingsSection>("ai");
+  const [modelId, setModelId] = useState(settings.modelId);
+  const [customBaseUrl, setCustomBaseUrl] = useState(settings.customProvider.baseUrl);
+  const [customModelId, setCustomModelId] = useState(settings.customProvider.modelId);
+  const [customCapabilities, setCustomCapabilities] = useState(settings.customProvider.capabilities);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const { t } = useTranslation();
+  const namedProvider = isNamedProvider(settings.provider) ? settings.provider : undefined;
+  const namedStatus = namedProvider ? namedProviders.find((status) => status.id === namedProvider) : undefined;
+  const sections: Array<[SettingsSection, string, string]> = [["ai", t("AI"), t("Models and providers")], ["appearance", t("Appearance"), t("Color and material")], ["usage", t("Usage"), t("Spend recorded locally")], ["permissions", t("Permissions"), t("Apps OpenUse may control")], ["advanced", t("Advanced"), t("Runtime diagnostics")]];
+  const allProviders: Array<[AppSettings["provider"], string]> = [["vercel-gateway", "Vercel AI Gateway"], ["codex", "Codex subscription"], ["claude", "Claude subscription"], ["opencode", "OpenCode subscription"], ["custom-openai-compatible", "Custom endpoint"]];
+
+  useEffect(() => { dialogRef.current?.focus(); const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); }; window.addEventListener("keydown", onKeyDown); return () => window.removeEventListener("keydown", onKeyDown); }, [onClose]);
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1} ref={dialogRef}><div className="dialog-topline"><div><div className="dialog-eyebrow">{t("OpenUse configuration")}</div><h2 id="settings-title">{t("Settings")}</h2></div><button className="close-button" type="button" aria-label={t("Close Settings")} onClick={onClose}>×</button></div><div className="settings-layout"><nav className="settings-nav" aria-label={t("Settings sections")}>{sections.map(([id, label, description]) => <button type="button" key={id} className={section === id ? "settings-nav-active" : ""} onClick={() => setSection(id)}><span>{label}</span><small>{description}</small></button>)}</nav><div className="settings-content">{section === "ai" && <><div className="settings-provider-switcher" role="tablist" aria-label={t("AI providers")}>{allProviders.map(([provider, label]) => <button key={provider} type="button" role="tab" aria-selected={settings.provider === provider} className={settings.provider === provider ? "provider-tab-active" : ""} onClick={() => onProvider(provider)}>{t(label)}</button>)}</div>{namedProvider ? <NamedSubscriptionSettings provider={namedProvider} config={settings.namedProviders[namedProvider]} status={namedStatus} onSave={onSaveNamed} onRefresh={onRefreshNamed} /> : <AISettings settings={settings} models={models} catalogStatus={catalogStatus} modelId={modelId} setModelId={setModelId} apiKeyDraft={apiKeyDraft} onApiKeyChange={onApiKeyChange} customKeyDraft={customKeyDraft} onCustomKeyChange={onCustomKeyChange} customBaseUrl={customBaseUrl} setCustomBaseUrl={setCustomBaseUrl} customModelId={customModelId} setCustomModelId={setCustomModelId} customCapabilities={customCapabilities} setCustomCapabilities={setCustomCapabilities} onProvider={onProvider} onSaveGateway={onSaveGateway} onSaveCustom={onSaveCustom} onTestConnection={onTestConnection} connectionTest={connectionTest} onRefreshModels={onRefreshModels} />}<div className="settings-divider" /><ReasoningSettings model={reasoningModelForSettings(settings, models)} value={settings.reasoningEffort} onReasoning={onReasoning} /></>}{section === "appearance" && <AppearanceSettings settings={settings} onAppearance={onAppearance} onLocale={onLocale} />}{section === "usage" && <UsageSettings usage={usage} onReset={onResetUsage} />}{section === "permissions" && <PermissionsSettings settings={settings} onPermissionChange={onPermissionChange} />}{section === "advanced" && <AdvancedSettings settings={settings} catalogStatus={catalogStatus} onRunSelfTest={onRunSelfTest} onOpenMacPrivacy={onOpenMacPrivacy} />}</div></div><div className="dialog-footer"><span className="settings-status"><span className={`status-dot ${settings.provider === "vercel-gateway" ? (settings.apiKeyConfigured ? "status-ready" : "status-offline") : settings.provider === "custom-openai-compatible" ? "status-ready" : snapshotNamedProviderReady(settings.provider, namedProviders) ? "status-ready" : "status-offline"}`} />{settings.provider === "vercel-gateway" ? (settings.apiKeyConfigured ? t("Gateway key configured") : t("Gateway key needed")) : settings.provider === "custom-openai-compatible" ? t("Custom endpoint selected") : namedStatus?.state === "ready" ? t("Subscription connected") : t("Subscription needs setup")}</span><button className="secondary-action" type="button" onClick={onClose}>{t("Done")}</button></div></div></div>;
+}
+
+function _LegacySettingsDialog({ settings, models, catalogStatus, usage, apiKeyDraft, customKeyDraft, onApiKeyChange, onCustomKeyChange, onClose, onSaveGateway, onSaveCustom, onTestConnection, connectionTest, onProvider, onLocale, onReasoning, onAppearance, onRefreshModels, onResetUsage, onPermissionChange, onRunSelfTest, onOpenMacPrivacy }: {
   settings: AppSettings;
   models: ModelDefinition[];
   catalogStatus: ModelCatalogStatus;
@@ -657,6 +752,23 @@ function AISettings({ settings, models, catalogStatus, modelId, setModelId, apiK
   const { locale, t } = useTranslation();
   const catalogSource = catalogStatus.source === "gateway-live" ? t("live") : catalogStatus.source === "gateway-cache" ? t("cached") : t("fallback");
   return <div className="settings-section"><div className="settings-section-heading"><div><div className="dialog-eyebrow">{t("AI")}</div><h3>{t("Choose how OpenUse thinks.")}</h3></div><span className="catalog-status">{t("{count} models / {source}", { count: formatNumber(locale, catalogStatus.count), source: catalogSource })}</span></div><div className="provider-tabs"><button type="button" className={settings.provider === "vercel-gateway" ? "provider-tab-active" : ""} onClick={() => onProvider("vercel-gateway")}>{t("Vercel AI Gateway")}</button><button type="button" className={settings.provider === "custom-openai-compatible" ? "provider-tab-active" : ""} onClick={() => onProvider("custom-openai-compatible")}>{t("Custom endpoint")}</button></div>{settings.provider === "vercel-gateway" ? <><div className="settings-field"><div className="field-label-row"><label>{t("Computer Use model")}</label><button className="link-button" type="button" onClick={onRefreshModels} disabled={catalogStatus.isRefreshing}>{catalogStatus.isRefreshing ? t("Refreshing...") : t("Refresh catalog")}</button></div><ModelPicker models={models} value={modelId} onSelect={setModelId} /><div className="field-note">{t("Showing models that advertise both tool calling and visual input. The catalog is validated and cached locally.")}</div></div><div className="settings-field"><label htmlFor="gateway-key">{t("API key")}</label><input id="gateway-key" type="password" autoComplete="off" value={apiKeyDraft} onChange={(event) => onApiKeyChange(event.target.value)} placeholder={settings.apiKeyConfigured ? t("Key saved - enter a new key to replace it") : t("Paste your AI_GATEWAY_API_KEY")} /><div className="field-note"><Glyph name="lock" /> {t("Stored locally with OS-backed encryption. Never returned to the renderer.")}</div></div><div className="connection-test"><button className="secondary-action" type="button" disabled={connectionTest === "testing"} onClick={() => onTestConnection(modelId)}>{connectionTest === "testing" ? t("Testing...") : t("Test connection")}</button>{connectionTest !== "idle" && connectionTest !== "testing" && <span className={connectionTest.ok ? "connection-success" : "connection-failure"}>{localizeRuntimeText(locale, connectionTest.message)}</span>}</div><button className="primary-action settings-save" type="button" onClick={() => onSaveGateway(modelId)}>{t("Save Gateway settings")}</button></> : <CustomProviderSettings baseUrl={customBaseUrl} setBaseUrl={setCustomBaseUrl} modelId={customModelId} setModelId={setCustomModelId} capabilities={customCapabilities} setCapabilities={setCustomCapabilities} keyDraft={customKeyDraft} onKeyChange={onCustomKeyChange} configured={settings.customProvider.apiKeyConfigured} onSave={() => onSaveCustom({ baseUrl: customBaseUrl, modelId: customModelId, capabilities: customCapabilities })} />}</div>;
+}
+
+const namedProviderSetup: Record<NamedProviderId, { install: string; login: string }> = {
+  codex: { install: "npm install -g @openai/codex", login: "codex login" },
+  claude: { install: "npm install -g @anthropic-ai/claude-code", login: "claude auth login" },
+  opencode: { install: "npm install -g opencode-ai", login: "opencode auth login" },
+};
+
+function NamedSubscriptionSettings({ provider, config, status, onSave, onRefresh }: { provider: NamedProviderId; config: AppSettings["namedProviders"][NamedProviderId]; status?: NamedProviderStatus; onSave(provider: NamedProviderId, input: { executablePath: string; modelId: string }): void; onRefresh(provider: NamedProviderId): void }) {
+  const { t } = useTranslation();
+  const [executablePath, setExecutablePath] = useState(config.executablePath);
+  const [modelId, setModelId] = useState(config.modelId);
+  const setup = namedProviderSetup[provider];
+  useEffect(() => { setExecutablePath(config.executablePath); setModelId(config.modelId); }, [config.executablePath, config.modelId, provider]);
+  const stateLabel = status?.state === "ready" ? t("Connected") : status?.state === "not-installed" ? t("Not installed") : status?.state === "not-authenticated" ? t("Sign-in required") : status?.state === "checking" ? t("Checking...") : t("Unavailable");
+  const stateClass = status?.state === "ready" ? "status-ready" : status?.state === "checking" ? "status-running" : "status-offline";
+  return <div className="named-provider-block"><div className="named-provider-heading"><div><div className="dialog-eyebrow">{t(`${provider} subscription`)}</div><h3>{t("Use your existing local subscription")}</h3></div><span className="named-provider-badge"><span className={`status-dot ${stateClass}`} />{stateLabel}</span></div><p className="settings-lede">{t("OpenUse starts the signed-in local runtime and gives it only the guarded OpenUse computer tools. Credentials remain with the provider CLI.")}</p><div className="named-provider-status"><span className={`status-dot ${stateClass}`} /><div><strong>{status?.detail ?? t("Check whether the local runtime is installed and authenticated.")}</strong>{status?.version && <small>{t("Detected version {version}", { version: status.version })}</small>}</div><button className="secondary-action" type="button" onClick={() => onRefresh(provider)}>{status?.state === "checking" ? t("Checking...") : t("Check connection")}</button></div><div className="settings-field"><label htmlFor={`${provider}-model-id`}>{t("Model ID")} <span className="optional-label">{t("optional")}</span></label><input id={`${provider}-model-id`} className="technical" dir="ltr" value={modelId} onChange={(event) => setModelId(event.target.value)} placeholder={t("Provider default")} /><div className="field-note">{t("Leave blank to use the model selected by the signed-in subscription runtime.")}</div></div><div className="settings-field"><label htmlFor={`${provider}-executable`}>{t("Executable path")} <span className="optional-label">{t("optional")}</span></label><input id={`${provider}-executable`} className="technical" dir="ltr" value={executablePath} onChange={(event) => setExecutablePath(event.target.value)} placeholder={t("Resolve from PATH")} /><div className="field-note">{t("Use this only when the command is not discoverable from PATH.")}</div></div><div className="provider-command-grid"><div><span>{t("Install")}</span><code>{setup.install}</code></div><div><span>{t("Sign in")}</span><code>{setup.login}</code></div></div><button className="primary-action settings-save" type="button" onClick={() => onSave(provider, { executablePath: executablePath.trim(), modelId: modelId.trim() })}>{t("Save and use {provider}", { provider: t(`${provider} subscription`) })}</button></div>;
 }
 
 interface CustomProviderSettingsProps {

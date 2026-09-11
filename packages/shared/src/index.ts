@@ -1,4 +1,6 @@
-export type ProviderId = "vercel-gateway" | "custom-openai-compatible";
+export type NamedProviderId = "codex" | "claude" | "opencode";
+
+export type ProviderId = "vercel-gateway" | "custom-openai-compatible" | NamedProviderId;
 
 export type Locale = "en" | "fa";
 
@@ -43,6 +45,27 @@ export interface ModelDefinition {
   tags?: string[];
   modalities?: { input: string[]; output: string[] };
   pricing?: ModelPricing;
+}
+
+export interface NamedProviderSettings {
+  /** Optional executable override. The default is resolved from the user's PATH. */
+  executablePath: string;
+  /** Optional provider-native model ID. Empty means use the provider default. */
+  modelId: string;
+}
+
+export type NamedProviderSettingsMap = Record<NamedProviderId, NamedProviderSettings>;
+
+export type NamedProviderState = "checking" | "ready" | "not-installed" | "not-authenticated" | "error";
+
+export interface NamedProviderStatus {
+  id: NamedProviderId;
+  displayName: string;
+  state: NamedProviderState;
+  version?: string;
+  executablePath?: string;
+  detail: string;
+  checkedAt?: string;
 }
 
 export type AgentStatus = "idle" | "running" | "completed" | "stopped" | "error";
@@ -235,6 +258,7 @@ export interface AppSettings {
   backgroundOpacity: number;
   showAgentCursor: boolean;
   customProvider: CustomProviderSettings;
+  namedProviders: NamedProviderSettingsMap;
 }
 
 export interface CustomProviderSettings {
@@ -333,6 +357,7 @@ export interface AppSnapshot {
   };
   usage: UsageSummary;
   threads: ThreadSnapshot;
+  namedProviders: NamedProviderStatus[];
 }
 
 export interface TimelineAction {

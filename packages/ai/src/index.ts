@@ -7,6 +7,7 @@ import {
   type ModelCapabilities,
   type ModelDefinition,
   type ModelPricing,
+  type NamedProviderId,
   type PricingTier,
   type ProviderId,
   type ReasoningEffort,
@@ -236,6 +237,30 @@ export interface UsageProfile {
 export function estimateTwentyStepCost(model: ModelDefinition | undefined, profile: UsageProfile | undefined, steps = 20): number | undefined {
   if (!model || !profile || steps <= 0) return undefined;
   return calculateModelCost(model.pricing, profile.inputTokensPerStep * steps, profile.outputTokensPerStep * steps);
+}
+
+const namedProviderInfo: Record<NamedProviderId, { label: string; sourceProvider: string; reasoningEfforts?: ReasoningEffort[] }> = {
+  codex: { label: "Codex subscription", sourceProvider: "OpenAI Codex", reasoningEfforts: ["provider-default", "low", "medium", "high", "xhigh"] },
+  claude: { label: "Claude subscription", sourceProvider: "Anthropic Claude Code", reasoningEfforts: ["provider-default", "low", "medium", "high", "xhigh"] },
+  opencode: { label: "OpenCode subscription", sourceProvider: "OpenCode", reasoningEfforts: ["provider-default"] },
+};
+
+export function namedProviderModelDefinition(provider: NamedProviderId, configuredModelId = ""): ModelDefinition {
+  const info = namedProviderInfo[provider];
+  return {
+    id: configuredModelId || `${provider}:default`,
+    label: configuredModelId || info.label,
+    provider,
+    sourceProvider: info.sourceProvider,
+    modelType: "language",
+    description: "Authenticated through the provider's local subscription runtime. OpenUse exposes only its guarded computer tools.",
+    capabilities: {
+      toolCalling: true,
+      vision: true,
+      reasoning: true,
+      reasoningEfforts: info.reasoningEfforts,
+    },
+  };
 }
 
 export interface AgentStepOptions {

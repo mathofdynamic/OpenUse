@@ -10,6 +10,7 @@
 - Added provider-neutral reasoning selection and per-model compatibility handling.
 - Added validated Gateway request-cost capture, live task/lifetime spend, approximate 20-step estimates, and a privacy-safe usage ledger.
 - Added a custom OpenAI-compatible endpoint path with Ollama and LM Studio presets.
+- Added named local subscription runtimes for Codex, Claude Code, and OpenCode with provider-owned authentication, optional model IDs, and one guarded per-task MCP bridge.
 - Added the cross-platform click-through OpenUse Agent Cursor with target geometry, DPI, display, semantic-action, and reduced-motion support.
 - Added perceptible interruptible cursor travel and a short terminal hold so brief tasks do not hide their final target before it can be understood; Stop remains immediate.
 - Added local task threads, folders, task history, continuation summaries, and automatic model-transcript compaction without persisting private observations.

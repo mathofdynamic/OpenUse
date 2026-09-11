@@ -25,7 +25,7 @@ const MAX_FOLDER_NAME = 80;
 const MAX_THREAD_TITLE = 160;
 const MAX_COMMAND_LENGTH = 10_000;
 const THREAD_STATUSES: ThreadTaskStatus[] = ["running", "completed", "stopped", "error"];
-const PROVIDERS: ProviderId[] = ["vercel-gateway", "custom-openai-compatible"];
+const PROVIDERS: ProviderId[] = ["vercel-gateway", "custom-openai-compatible", "codex", "claude", "opencode"];
 const REASONING: ReasoningEffort[] = ["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"];
 
 const persistedFileSchema = z.object({

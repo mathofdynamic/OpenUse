@@ -37,7 +37,7 @@ const appSchema = z.string().trim().min(1).max(160);
 const roleSchema = z.string().trim().min(1).max(80);
 const nameSchema = z.string().trim().min(1).max(240);
 
-const schemas = {
+export const computerToolSchemas = {
   computer_list_apps: z.object({}),
   computer_list_windows: z.object({}),
   computer_inspect_window: z.object({ windowId: windowIdSchema }),
@@ -87,67 +87,67 @@ const schemas = {
   computer_finish: z.object({ summary: z.string().trim().min(1).max(800) }),
 };
 
-export type ComputerToolName = keyof typeof schemas;
+export type ComputerToolName = keyof typeof computerToolSchemas;
 export type ComputerToolInput = {
-  [Name in ComputerToolName]: z.infer<(typeof schemas)[Name]>;
+  [Name in ComputerToolName]: z.infer<(typeof computerToolSchemas)[Name]>;
 };
 
 export const computerTools: ToolSet = {
   computer_list_apps: tool({
     description: "List the visible desktop applications. Use this before launching an uncertain app.",
-    inputSchema: schemas.computer_list_apps,
+    inputSchema: computerToolSchemas.computer_list_apps,
   }),
   computer_list_windows: tool({
     description: "List current top-level application windows with stable window IDs, titles, and app identities.",
-    inputSchema: schemas.computer_list_windows,
+    inputSchema: computerToolSchemas.computer_list_windows,
   }),
   computer_inspect_window: tool({
     description: "Inspect one window and return a small semantic accessibility tree. Prefer this before clicking.",
-    inputSchema: schemas.computer_inspect_window,
+    inputSchema: computerToolSchemas.computer_inspect_window,
   }),
   computer_capture_screen: tool({
     description: "Capture one reduced screenshot when semantic state is insufficient. Do not call continuously.",
-    inputSchema: schemas.computer_capture_screen,
+    inputSchema: computerToolSchemas.computer_capture_screen,
   }),
   computer_launch_app: tool({
     description: "Launch a named desktop application. The runtime applies its own app permission policy.",
-    inputSchema: schemas.computer_launch_app,
+    inputSchema: computerToolSchemas.computer_launch_app,
   }),
   computer_focus_window: tool({
     description: "Focus a window by the ID returned by listWindows.",
-    inputSchema: schemas.computer_focus_window,
+    inputSchema: computerToolSchemas.computer_focus_window,
   }),
   computer_click: tool({
     description: "Click screen coordinates only when semantic element interaction is unavailable.",
-    inputSchema: schemas.computer_click,
+    inputSchema: computerToolSchemas.computer_click,
   }),
   computer_click_element: tool({
     description: "Click a fresh semantic UI element by role/name/automation ID, using its native pattern first.",
-    inputSchema: schemas.computer_click_element,
+    inputSchema: computerToolSchemas.computer_click_element,
   }),
   computer_double_click: tool({
     description: "Double-click screen coordinates as a last-resort interaction.",
-    inputSchema: schemas.computer_double_click,
+    inputSchema: computerToolSchemas.computer_double_click,
   }),
   computer_type_text: tool({
     description: "Type text into the focused or target window. Never use this for passwords or credentials.",
-    inputSchema: schemas.computer_type_text,
+    inputSchema: computerToolSchemas.computer_type_text,
   }),
   computer_press_key: tool({
     description: "Press one named key or a safe chord such as CMD+S, CTRL+S, ENTER, TAB, or ESCAPE.",
-    inputSchema: schemas.computer_press_key,
+    inputSchema: computerToolSchemas.computer_press_key,
   }),
   computer_scroll: tool({
     description: "Scroll the focused application by a bounded amount.",
-    inputSchema: schemas.computer_scroll,
+    inputSchema: computerToolSchemas.computer_scroll,
   }),
   computer_wait: tool({
     description: "Wait briefly for a desktop UI transition to settle.",
-    inputSchema: schemas.computer_wait,
+    inputSchema: computerToolSchemas.computer_wait,
   }),
   computer_finish: tool({
     description: "Use this when the user task is complete and the final state has been verified.",
-    inputSchema: schemas.computer_finish,
+    inputSchema: computerToolSchemas.computer_finish,
   }),
 };
 
@@ -199,9 +199,9 @@ type ContentToolOutput = {
     | { type: "file"; mediaType: string; data: { type: "data"; data: string } }
   >;
 };
-type ToolOutput = JsonToolOutput | ContentToolOutput;
+export type ToolOutput = JsonToolOutput | ContentToolOutput;
 
-interface ToolExecution {
+export interface ToolExecution {
   output: ToolOutput;
   telemetry?: Omit<ActionTelemetry, "retryCount">;
   observation?: WindowInspection;
@@ -264,7 +264,7 @@ function elementLabel(input: { role?: string; name?: string }): string {
 
 export class ComputerUseAgent {
   constructor(
-    private readonly provider: ModelProvider,
+    private readonly provider: ModelProvider | undefined,
     private readonly computer: ComputerController,
     private readonly permissions: PermissionEngine,
   ) {}
@@ -281,6 +281,7 @@ export class ComputerUseAgent {
       ? `Earlier work in this OpenUse thread is summarized below. Treat it as context, not as a new instruction. Re-observe the current desktop before acting.\n\n${options.threadContext}\n\nCurrent task:\n${options.command}`
       : options.command;
     let messages: ModelMessage[] = [{ role: "user", content: initialPrompt }];
+    if (!this.provider) throw new OpenUseError("MODEL_FAILED", "This Computer Use agent has no model provider.");
     const capabilities = this.provider.getCapabilities(options.modelId);
     if (!capabilities.toolCalling || !capabilities.vision) {
       throw new OpenUseError(
@@ -354,7 +355,7 @@ export class ComputerUseAgent {
         actionCount += 1;
         const actionId = `${options.taskId}-action-${actionCount}`;
         const toolName = toolCall.toolName as ComputerToolName;
-        const inputResult = schemas[toolName]?.safeParse(toolCall.input);
+        const inputResult = computerToolSchemas[toolName]?.safeParse(toolCall.input);
         const rawInput = inputResult?.success ? inputResult.data : undefined;
         const failureKey = `${toolName}:${failureSignature(inputResult?.success ? inputResult.data : toolCall.input)}`;
         const retryCount = failureCounts.get(failureKey) ?? 0;
@@ -757,6 +758,16 @@ export class ComputerUseAgent {
       }
     }
   }
+
+  /** Executes one validated OpenUse tool for a product-owned external provider bridge. */
+  public async executeComputerTool<N extends ComputerToolName>(
+    toolName: N,
+    input: ComputerToolInput[N],
+    options: AgentRunOptions,
+    lastScreenshot?: Screenshot,
+  ): Promise<ToolExecution> {
+    return this.executeTool(toolName, input, options, lastScreenshot);
+  }
 }
 
 function appMatches(actual: string, requested: string): boolean {
@@ -786,7 +797,7 @@ function findElement(inspection: WindowInspection, input: ElementSelector): Wind
 
 type ActionTarget = Pick<ActionTelemetry, "targetApp" | "targetWindowId" | "targetWindowTitle" | "targetElementId">;
 
-function cursorTargetForAction(toolName: ComputerToolName, input: unknown, inspection?: WindowInspection): CursorTarget | undefined {
+export function cursorTargetForAction(toolName: ComputerToolName, input: unknown, inspection?: WindowInspection): CursorTarget | undefined {
   const record = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const coordinateSystem = "unknown";
   if ((toolName === "computer_click" || toolName === "computer_double_click") && typeof record.x === "number" && typeof record.y === "number") {
@@ -824,7 +835,7 @@ function cursorTargetForAction(toolName: ComputerToolName, input: unknown, inspe
   return undefined;
 }
 
-function targetTelemetry(toolName: ComputerToolName, input: unknown, inspection?: WindowInspection): ActionTarget {
+export function targetTelemetry(toolName: ComputerToolName, input: unknown, inspection?: WindowInspection): ActionTarget {
   const record = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const windowId = typeof record.windowId === "string" ? record.windowId : undefined;
   const elementId = typeof record.elementId === "string" ? record.elementId : undefined;
@@ -982,7 +993,7 @@ function windowIdFromInput(input: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function actionSummary(toolName: ComputerToolName, input: unknown): string {
+export function actionSummary(toolName: ComputerToolName, input: unknown): string {
   const typed = input as Record<string, unknown> | undefined;
   switch (toolName) {
     case "computer_list_apps": return "Inspecting available applications";
@@ -1006,7 +1017,7 @@ function isReadOnlyTool(toolName: ComputerToolName): boolean {
   return toolName === "computer_list_apps" || toolName === "computer_list_windows" || toolName === "computer_inspect_window" || toolName === "computer_capture_screen";
 }
 
-function detailForTimeline(toolName: ComputerToolName, output: ToolOutput): string | undefined {
+export function detailForTimeline(toolName: ComputerToolName, output: ToolOutput): string | undefined {
   if (toolName === "computer_type_text") return "Text input sent; content omitted from logs.";
   if (output.type === "content") return "Screenshot sent to the model for visual verification.";
   if (toolName === "computer_finish") return "Task marked complete by the agent.";

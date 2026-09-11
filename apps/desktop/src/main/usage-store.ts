@@ -197,7 +197,9 @@ function sanitizeRecord(value: unknown): UsageTaskRecord | undefined {
   if (!value || typeof value !== "object") return undefined;
   const record = value as Partial<UsageTaskRecord>;
   if (typeof record.id !== "string" || typeof record.timestamp !== "string" || typeof record.modelId !== "string") return undefined;
-  const provider: ProviderId = record.provider === "custom-openai-compatible" ? record.provider : "vercel-gateway";
+  const provider: ProviderId = ["vercel-gateway", "custom-openai-compatible", "codex", "claude", "opencode"].includes(record.provider as ProviderId)
+    ? record.provider as ProviderId
+    : "vercel-gateway";
   const effort: ReasoningEffort = ["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"].includes(record.reasoningEffort as ReasoningEffort) ? record.reasoningEffort as ReasoningEffort : "provider-default";
   const status = record.status === "completed" || record.status === "stopped" ? record.status : "error";
   return {

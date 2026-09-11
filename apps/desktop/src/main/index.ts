@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, safeStorage, shell } from "electron"
 import type { MenuItemConstructorOptions } from "electron";
 import { join } from "node:path";
 import { z } from "zod";
-import type { Locale, PermissionDecision, PermissionLevel, RuntimeEvent } from "@openuse/shared";
+import type { Locale, NamedProviderId, PermissionDecision, PermissionLevel, RuntimeEvent } from "@openuse/shared";
 import { OpenUseError, nowIso, type AppSnapshot, type EngineSelfTestResult } from "@openuse/shared";
 import { testGatewayConnection } from "@openuse/ai";
 import { GatewaySecretStore } from "./secure-store";
@@ -15,6 +15,7 @@ import { ModelCatalogStore } from "./model-catalog-store";
 import { UsageStore } from "./usage-store";
 import { CursorOverlayManager } from "./cursor-overlay";
 import { ThreadStore } from "./thread-store";
+import { NamedProviderManager } from "./named-provider-runtime";
 
 let mainWindow: BrowserWindow | undefined;
 let settings: SettingsStore;
@@ -26,6 +27,7 @@ let modelCatalog: ModelCatalogStore;
 let usage: UsageStore;
 let threads: ThreadStore;
 let cursorOverlay: CursorOverlayManager | undefined;
+let namedProviders: NamedProviderManager;
 let qualificationSelfTest: EngineSelfTestResult | undefined;
 let isQuitting = false;
 
@@ -44,7 +46,12 @@ const appPermissionSchema = z.object({
   appIdentity: z.string().trim().min(1).max(240).optional(),
   level: z.enum(["ALLOW", "ASK", "DENY"]),
 });
-const providerSchema = z.object({ provider: z.enum(["vercel-gateway", "custom-openai-compatible"]) });
+const providerSchema = z.object({ provider: z.enum(["vercel-gateway", "custom-openai-compatible", "codex", "claude", "opencode"]) });
+const namedProviderSchema = z.object({
+  provider: z.enum(["codex", "claude", "opencode"]),
+  executablePath: z.string().trim().max(500).optional(),
+  modelId: z.string().trim().max(240).optional(),
+});
 const localeSchema = z.object({ locale: z.enum(["en", "fa"]) });
 const reasoningSchema = z.object({ reasoningEffort: z.enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"]) });
 const appearanceSchema = z.object({
@@ -131,6 +138,7 @@ function publicSnapshot(): Promise<AppSnapshot> {
     modelCatalog: modelCatalog.snapshot(),
     usage: usage.snapshot(),
     threads: threads.snapshot(),
+    namedProviders: namedProviders.snapshot(),
   }));
 }
 
@@ -173,6 +181,20 @@ function installIpc(): void {
   ipcMain.handle("openuse:set-custom-provider", async (event, raw: unknown) => {
     assertSender(event);
     await settings.setCustomProvider(customProviderSchema.parse(raw));
+    return publicSnapshot();
+  });
+  ipcMain.handle("openuse:set-named-provider", async (event, raw: unknown) => {
+    assertSender(event);
+    const input = namedProviderSchema.parse(raw);
+    await settings.setNamedProvider(input.provider as NamedProviderId, { executablePath: input.executablePath, modelId: input.modelId });
+    await settings.setProvider(input.provider as NamedProviderId);
+    await namedProviders.refresh(input.provider as NamedProviderId);
+    return publicSnapshot();
+  });
+  ipcMain.handle("openuse:refresh-named-provider", async (event, raw: unknown) => {
+    assertSender(event);
+    const input = raw === undefined ? undefined : z.object({ provider: z.enum(["codex", "claude", "opencode"]) }).parse(raw).provider;
+    await namedProviders.refresh(input);
     return publicSnapshot();
   });
   ipcMain.handle("openuse:save-gateway-key", async (event, raw: unknown) => {
@@ -349,6 +371,7 @@ async function bootstrap(): Promise<void> {
   await app.whenReady();
   settings = new SettingsStore(join(app.getPath("userData"), "settings.json"));
   await settings.initialize();
+  namedProviders = new NamedProviderManager(() => settings.persisted);
   installApplicationMenu(settings.persisted.locale);
   secrets = new GatewaySecretStore(join(app.getPath("userData"), "secrets.json"), safeStorage);
   modelCatalog = new ModelCatalogStore(join(app.getPath("userData"), "model-catalog.json"));
@@ -376,6 +399,7 @@ async function bootstrap(): Promise<void> {
     getModels: () => modelCatalog.snapshot().models,
     usage,
     threads,
+    namedProviders,
     emit: (event) => {
       qualification.record(event);
       logRuntimeEvent(event, !app.isPackaged);
@@ -393,6 +417,7 @@ async function bootstrap(): Promise<void> {
   });
   installIpc();
   createWindow();
+  void namedProviders.refresh().then(() => publicSnapshot()).then((snapshot) => mainWindow?.webContents.send("openuse:snapshot", snapshot)).catch(() => undefined);
   // macOS self-tests run on every desktop launch so the UI can distinguish a
   // missing Accessibility/Screen Recording grant from an offline controller.
   // Windows keeps the existing qualification-only behavior to avoid changing

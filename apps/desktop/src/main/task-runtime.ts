@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { ComputerUseAgent } from "@openuse/agent";
-import { CustomOpenAICompatibleProvider, GatewayModelProvider, customModelDefinition, getModelDefinition, resolveReasoningEffort } from "@openuse/ai";
+import { CustomOpenAICompatibleProvider, GatewayModelProvider, customModelDefinition, getModelDefinition, namedProviderModelDefinition, resolveReasoningEffort } from "@openuse/ai";
 import { NativeComputerController } from "@openuse/computer";
 import {
   InMemoryPermissionStore,
@@ -26,6 +26,7 @@ import type { SettingsStore } from "./settings-store";
 import type { NativeEngineProcess } from "./native-process";
 import type { UsageStore } from "./usage-store";
 import type { ThreadStore } from "./thread-store";
+import type { NamedProviderManager } from "./named-provider-runtime";
 
 export interface TaskRuntimeOptions {
   settings: SettingsStore;
@@ -36,6 +37,7 @@ export interface TaskRuntimeOptions {
   usage: UsageStore;
   emit: (event: RuntimeEvent) => void;
   threads?: ThreadStore;
+  namedProviders: NamedProviderManager;
   qualificationMode?: boolean;
 }
 
@@ -87,9 +89,15 @@ export class TaskRuntime {
     let stepCount = 0;
     const stored = this.options.settings.persisted;
     const providerId: ProviderId = stored.provider;
-    const modelId = providerId === "custom-openai-compatible" ? stored.customProvider.modelId : stored.modelId;
+    const modelId = providerId === "custom-openai-compatible"
+      ? stored.customProvider.modelId
+      : isNamedProvider(providerId)
+        ? stored.namedProviders[providerId].modelId || "default"
+        : stored.modelId;
     const model = providerId === "custom-openai-compatible"
       ? customModelDefinition({ baseUrl: stored.customProvider.baseUrl, modelId, capabilities: stored.customProvider.capabilities })
+      : isNamedProvider(providerId)
+        ? namedProviderModelDefinition(providerId, stored.namedProviders[providerId].modelId)
       : getModelDefinition(modelId, this.options.getModels());
     const capabilities = model?.capabilities ?? { toolCalling: false, vision: false };
     const reasoningEffort = resolveReasoningEffort(model, stored.reasoningEffort) ?? "provider-default";
@@ -111,37 +119,47 @@ export class TaskRuntime {
           modelId,
           capabilities: stored.customProvider.capabilities,
         })
-      : new GatewayModelProvider(this.options.readApiKey, this.options.getModels());
+      : providerId === "vercel-gateway"
+        ? new GatewayModelProvider(this.options.readApiKey, this.options.getModels())
+        : undefined;
     const agent = new ComputerUseAgent(provider, new NativeComputerController(this.options.engine), permissionEngine);
     const finish = (status: "completed" | "stopped" | "error", summary: string, resultActionCount: number, durationMs: number, errorCode?: OpenUseErrorCode) => {
       this.options.usage.finishTask(taskId, status, stepCount, resultActionCount, durationMs);
       this.emit({ type: "task.finished", taskId, status, summary, actionCount: resultActionCount, durationMs, ...(errorCode ? { errorCode } : {}), at: nowIso() });
     };
-    const promise = agent.run({
-      taskId,
-      command,
-      modelId,
-      maxActions: 30,
-      abortSignal: abort.signal,
-      reasoningEffort,
-      threadContext,
-      contextWindow: model?.contextWindow,
-      qualificationMode: this.options.qualificationMode,
-      onEvent: (event) => {
-        if (event.type === "agent.step") stepCount = Math.max(stepCount, event.step);
-        if (event.type === "action.started") {
-          actionCount += 1;
-          this.options.usage.recordAction(taskId);
-        }
-        if (event.type === "model.usage") {
-          this.options.usage.recordRequest({ taskId, step: event.step, modelId: event.modelId, provider: event.provider, inputTokens: event.inputTokens, outputTokens: event.outputTokens, actualCost: event.actualCost });
-          const usage = this.options.usage.snapshot();
-          event = { ...event, taskCost: this.options.usage.taskCost(taskId), lifetimeSpend: usage.totalKnownSpend };
-        }
-        this.emit(event);
-        if (event.type === "action.completed" || event.type === "action.failed") this.emit({ type: "engine.status", status: this.options.engine.status, at: nowIso() });
-      },
-    }).then((result) => {
+    const onEvent = (event: RuntimeEvent): void => {
+      if (event.type === "agent.step") stepCount = Math.max(stepCount, event.step);
+      if (event.type === "action.started") {
+        actionCount += 1;
+        this.options.usage.recordAction(taskId);
+      }
+      if (event.type === "model.usage") {
+        this.options.usage.recordRequest({ taskId, step: event.step, modelId: event.modelId, provider: event.provider, inputTokens: event.inputTokens, outputTokens: event.outputTokens, actualCost: event.actualCost });
+        const usage = this.options.usage.snapshot();
+        event = { ...event, taskCost: this.options.usage.taskCost(taskId), lifetimeSpend: usage.totalKnownSpend };
+      }
+      this.emit(event);
+      if (event.type === "action.completed" || event.type === "action.failed") this.emit({ type: "engine.status", status: this.options.engine.status, at: nowIso() });
+    };
+    const externalRun = isNamedProvider(providerId)
+      ? this.options.namedProviders.run({ provider: providerId, settings: stored, taskId, command, modelId, reasoningEffort, threadContext, abortSignal: abort.signal, agent, onEvent }).then((result) => {
+          stepCount = Math.max(stepCount, 1);
+          onEvent({ type: "model.usage", taskId, step: stepCount, modelId, provider: providerId, inputTokens: result.usage?.inputTokens, outputTokens: result.usage?.outputTokens, reasoningEffort, costSource: "unknown", taskCost: 0, lifetimeSpend: 0, at: nowIso() });
+          return { status: "completed" as const, summary: result.summary, actionCount: result.actionCount, errorCode: undefined };
+        })
+      : agent.run({
+          taskId,
+          command,
+          modelId,
+          maxActions: 30,
+          abortSignal: abort.signal,
+          reasoningEffort,
+          threadContext,
+          contextWindow: model?.contextWindow,
+          qualificationMode: this.options.qualificationMode,
+          onEvent,
+        });
+    const promise = externalRun.then((result) => {
       finish(result.status, result.summary, result.actionCount, Date.now() - startedAt, result.errorCode);
     }).catch((error) => {
       const openUseError = asOpenUseError(error, "MODEL_FAILED");
@@ -215,4 +233,8 @@ export class TaskRuntime {
       });
     });
   }
+}
+
+function isNamedProvider(provider: ProviderId): provider is "codex" | "claude" | "opencode" {
+  return provider === "codex" || provider === "claude" || provider === "opencode";
 }

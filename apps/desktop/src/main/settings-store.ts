@@ -8,11 +8,14 @@ import type {
   PermissionLevel,
   PermissionRecord,
   ProviderId,
+  NamedProviderId,
+  NamedProviderSettings,
+  NamedProviderSettingsMap,
   Locale,
   ReasoningEffort,
 } from "@openuse/shared";
 
-export const SETTINGS_VERSION = 4 as const;
+export const SETTINGS_VERSION = 5 as const;
 export const DEFAULT_PRIMARY_COLOR = "#c8f36a";
 export const DEFAULT_BACKGROUND_BLUR = 18;
 export const DEFAULT_BACKGROUND_OPACITY = 0.78;
@@ -37,10 +40,12 @@ export interface PersistedSettings {
   backgroundOpacity: number;
   showAgentCursor: boolean;
   customProvider: PersistedCustomProvider;
+  namedProviders: NamedProviderSettingsMap;
 }
 
 const LEGACY_DEFAULT_MODEL_ID = "openai/gpt-5.4";
 const REASONING_EFFORTS: ReasoningEffort[] = ["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"];
+const NAMED_PROVIDER_IDS: NamedProviderId[] = ["codex", "claude", "opencode"];
 
 function sanitizeLocale(value: unknown, fallback: Locale = DEFAULT_LOCALE): Locale {
   return value === "fa" || value === "en" ? value : fallback;
@@ -62,6 +67,11 @@ export function defaultSettings(): PersistedSettings {
       baseUrl: "http://localhost:11434/v1",
       modelId: "llama3.2-vision",
       capabilities: { toolCalling: false, vision: false, reasoning: false },
+    },
+    namedProviders: {
+      codex: { executablePath: "", modelId: "" },
+      claude: { executablePath: "", modelId: "" },
+      opencode: { executablePath: "", modelId: "" },
     },
   };
 }
@@ -112,6 +122,23 @@ function sanitizeCustomProvider(value: unknown, fallback: PersistedCustomProvide
   };
 }
 
+function sanitizeNamedProvider(value: unknown, fallback: NamedProviderSettings): NamedProviderSettings {
+  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return {
+    executablePath: safeString(record.executablePath, fallback.executablePath, 500),
+    modelId: safeString(record.modelId, fallback.modelId, 240),
+  };
+}
+
+function sanitizeNamedProviders(value: unknown, fallback: NamedProviderSettingsMap): NamedProviderSettingsMap {
+  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return {
+    codex: sanitizeNamedProvider(record.codex, fallback.codex),
+    claude: sanitizeNamedProvider(record.claude, fallback.claude),
+    opencode: sanitizeNamedProvider(record.opencode, fallback.opencode),
+  };
+}
+
 export class SettingsStore {
   private value: PersistedSettings = defaultSettings();
   private persistQueue: Promise<void> = Promise.resolve();
@@ -127,7 +154,7 @@ export class SettingsStore {
       this.value = {
         version: SETTINGS_VERSION,
         locale: sanitizeLocale(parsed.locale, defaults.locale),
-        provider: parsed.provider === "custom-openai-compatible" ? parsed.provider : defaults.provider,
+        provider: isProviderId(parsed.provider) ? parsed.provider : defaults.provider,
         modelId: migrateLegacyDefault ? defaults.modelId : storedModelId ?? defaults.modelId,
         permissions: Array.isArray(parsed.permissions) ? sanitizePermissions(parsed.permissions) : defaults.permissions,
         reasoningEffort: REASONING_EFFORTS.includes(parsed.reasoningEffort as ReasoningEffort) ? parsed.reasoningEffort as ReasoningEffort : defaults.reasoningEffort,
@@ -136,6 +163,7 @@ export class SettingsStore {
         backgroundOpacity: clampOpacity(typeof parsed.backgroundOpacity === "number" ? parsed.backgroundOpacity : defaults.backgroundOpacity),
         showAgentCursor: typeof parsed.showAgentCursor === "boolean" ? parsed.showAgentCursor : defaults.showAgentCursor,
         customProvider: sanitizeCustomProvider(parsed.customProvider, defaults.customProvider),
+        namedProviders: sanitizeNamedProviders(parsed.namedProviders, defaults.namedProviders),
       };
       if (parsed.version !== SETTINGS_VERSION || migrateLegacyDefault) await this.persist();
     } catch (error) {
@@ -149,6 +177,11 @@ export class SettingsStore {
       ...this.value,
       permissions: this.value.permissions.map((record) => ({ ...record })),
       customProvider: { ...this.value.customProvider, capabilities: { ...this.value.customProvider.capabilities } },
+      namedProviders: {
+        codex: { ...this.value.namedProviders.codex },
+        claude: { ...this.value.namedProviders.claude },
+        opencode: { ...this.value.namedProviders.opencode },
+      },
     };
   }
 
@@ -163,7 +196,7 @@ export class SettingsStore {
   }
 
   async setProvider(provider: ProviderId): Promise<void> {
-    this.value.provider = provider === "custom-openai-compatible" ? provider : "vercel-gateway";
+    this.value.provider = isProviderId(provider) ? provider : "vercel-gateway";
     await this.persist();
   }
 
@@ -182,6 +215,11 @@ export class SettingsStore {
 
   async setCustomProvider(input: Partial<PersistedCustomProvider>): Promise<void> {
     this.value.customProvider = sanitizeCustomProvider({ ...this.value.customProvider, ...input }, this.value.customProvider);
+    await this.persist();
+  }
+
+  async setNamedProvider(provider: NamedProviderId, input: Partial<NamedProviderSettings>): Promise<void> {
+    this.value.namedProviders[provider] = sanitizeNamedProvider({ ...this.value.namedProviders[provider], ...input }, this.value.namedProviders[provider]);
     await this.persist();
   }
 
@@ -220,6 +258,11 @@ export class SettingsStore {
         apiKeyConfigured: customApiKeyConfigured,
         capabilities: { ...this.value.customProvider.capabilities },
       },
+      namedProviders: {
+        codex: { ...this.value.namedProviders.codex },
+        claude: { ...this.value.namedProviders.claude },
+        opencode: { ...this.value.namedProviders.opencode },
+      },
     };
   }
 
@@ -245,4 +288,8 @@ function sanitizePermissions(records: PermissionRecord[]): PermissionRecord[] {
     updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString(),
   }));
   return valid.length > 0 ? valid : defaultPermissionRecords();
+}
+
+function isProviderId(value: unknown): value is ProviderId {
+  return value === "vercel-gateway" || value === "custom-openai-compatible" || (typeof value === "string" && NAMED_PROVIDER_IDS.includes(value as NamedProviderId));
 }

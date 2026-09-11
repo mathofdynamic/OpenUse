@@ -1,4 +1,4 @@
-import type { AgentStatus, Locale, ReasoningEffort } from "@openuse/shared";
+import type { AgentStatus, Locale, ProviderId, ReasoningEffort } from "@openuse/shared";
 
 type MessageValues = Record<string, string | number>;
 
@@ -232,6 +232,28 @@ const faMessages: Record<string, string> = {
   "Gateway key configured": "کلید درگاه تنظیم شده است",
   "Gateway key needed": "کلید درگاه لازم است",
   "Custom endpoint selected": "نقطهٔ اتصال سفارشی انتخاب شده است",
+  "Codex subscription": "اشتراک Codex",
+  "Claude subscription": "اشتراک Claude",
+  "OpenCode subscription": "اشتراک OpenCode",
+  "AI providers": "ارائه‌دهندگان هوش مصنوعی",
+  "Use your existing local subscription": "از اشتراک محلی موجود خود استفاده کنید",
+  "OpenUse starts the signed-in local runtime and gives it only the guarded OpenUse computer tools. Credentials remain with the provider CLI.": "OpenUse اجرای محلیِ واردشده را راه‌اندازی می‌کند و فقط ابزارهای محافظت‌شدهٔ رایانهٔ OpenUse را در اختیار آن می‌گذارد. اطلاعات ورود نزد خط فرمان ارائه‌دهنده باقی می‌ماند.",
+  "Check whether the local runtime is installed and authenticated.": "بررسی کنید اجرای محلی نصب و احراز هویت شده باشد.",
+  "Detected version {version}": "نسخهٔ شناسایی‌شده {version}",
+  "Not installed": "نصب نشده",
+  "Sign-in required": "ورود لازم است",
+  "Checking...": "در حال بررسی...",
+  Unavailable: "در دسترس نیست",
+  "Check connection": "بررسی اتصال",
+  "Leave blank to use the model selected by the signed-in subscription runtime.": "برای استفاده از مدل انتخاب‌شده توسط اجرای اشتراک، این بخش را خالی بگذارید.",
+  "Executable path": "مسیر فایل اجرایی",
+  "Resolve from PATH": "شناسایی از PATH",
+  "Use this only when the command is not discoverable from PATH.": "فقط وقتی استفاده کنید که فرمان از PATH پیدا نمی‌شود.",
+  Install: "نصب",
+  "Sign in": "ورود",
+  "Save and use {provider}": "ذخیره و استفاده از {provider}",
+  "Subscription connected": "اشتراک متصل است",
+  "Subscription needs setup": "اشتراک نیازمند راه‌اندازی است",
   Done: "انجام شد",
   "Computer control setup": "راه‌اندازی کنترل رایانه",
   "OpenUse needs two macOS permissions.": "OpenUse به دو مجوز macOS نیاز دارد.",
@@ -378,8 +400,15 @@ export function platformName(locale: Locale, platform: string): string {
   return platform === "unknown" ? translate(locale, "Desktop") : platform;
 }
 
-export function providerLabel(locale: Locale, provider: "vercel-gateway" | "custom-openai-compatible"): string {
-  return provider === "vercel-gateway" ? translate(locale, "Vercel AI Gateway") : translate(locale, "Custom endpoint");
+export function providerLabel(locale: Locale, provider: ProviderId): string {
+  const labels: Record<ProviderId, string> = {
+    "vercel-gateway": "Vercel AI Gateway",
+    "custom-openai-compatible": "Custom endpoint",
+    codex: "Codex subscription",
+    claude: "Claude subscription",
+    opencode: "OpenCode subscription",
+  };
+  return translate(locale, labels[provider]);
 }
 
 export function statusLabel(locale: Locale, status: AgentStatus): string {
