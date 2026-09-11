@@ -29,7 +29,7 @@ process.exit(failed ? 1 : 0);
 
 function runCheck(label, command, args) {
   console.log(`\n[${label}] ${command} ${args.join(" ")}`);
-  const result = spawnSync(command, args, { cwd: repositoryRoot, stdio: "inherit", windowsHide: true });
+  const result = spawnSync(command, args, { cwd: repositoryRoot, stdio: "inherit", windowsHide: true, ...(command.toLowerCase().endsWith(".cmd") ? { shell: true } : {}) });
   const passed = result.status === 0 && !result.error;
   checks.push({ label, passed });
   if (!passed) console.error(`[${label}] failed; the preflight will not report readiness.`);

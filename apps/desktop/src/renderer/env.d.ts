@@ -1,21 +1,40 @@
 import type { GatewayConnectionResult } from "@openuse/ai";
-import type { AppSnapshot, PermissionDecision, PermissionLevel, RuntimeEvent } from "@openuse/shared";
+import type { AppSnapshot, PermissionDecision, PermissionLevel, ProviderId, ReasoningEffort, RuntimeEvent } from "@openuse/shared";
 
 declare global {
   interface Window {
     openuse: {
       getSnapshot(): Promise<AppSnapshot>;
-      setModel(modelId: string): Promise<void>;
-      saveGatewayApiKey(apiKey: string): Promise<void>;
+      setModel(modelId: string): Promise<AppSnapshot>;
+      setProvider(provider: ProviderId): Promise<AppSnapshot>;
+      setNamedProvider(provider: "codex" | "claude" | "opencode", settings: { executablePath?: string; modelId?: string }): Promise<AppSnapshot>;
+      refreshNamedProvider(provider?: "codex" | "claude" | "opencode"): Promise<AppSnapshot>;
+      setLocale(locale: "en" | "fa"): Promise<AppSnapshot>;
+      setReasoningEffort(reasoningEffort: ReasoningEffort): Promise<AppSnapshot>;
+      setAppearance(settings: { primaryColor?: string; backgroundBlur?: number; backgroundOpacity?: number; showAgentCursor?: boolean }): Promise<AppSnapshot>;
+      setCustomProvider(settings: { baseUrl?: string; modelId?: string; capabilities?: { toolCalling: boolean; vision: boolean; reasoning: boolean } }): Promise<AppSnapshot>;
+      saveGatewayApiKey(apiKey: string): Promise<AppSnapshot>;
+      saveCustomApiKey(apiKey: string): Promise<AppSnapshot>;
       testGatewayConnection(modelId: string): Promise<GatewayConnectionResult>;
       runSelfTest(): Promise<void>;
       openMacPrivacy(area: "accessibility" | "screen-recording"): Promise<void>;
       relaunch(): Promise<void>;
-      startTask(command: string): Promise<void>;
+      startTask(command: string, threadId: string): Promise<void>;
+      createThread(): Promise<AppSnapshot>;
+      selectThread(threadId: string): Promise<AppSnapshot>;
+      createThreadFolder(name: string): Promise<AppSnapshot>;
+      moveThread(threadId: string, folderId?: string): Promise<AppSnapshot>;
       stopTask(): Promise<void>;
+      refreshModelCatalog(): Promise<AppSnapshot>;
+      resetUsage(): Promise<AppSnapshot>;
+      minimizeWindow(): Promise<void>;
+      toggleMaximizeWindow(): Promise<boolean>;
+      closeWindow(): Promise<void>;
+      onWindowState(listener: (state: { maximized: boolean }) => void): () => void;
       decidePermission(id: string, decision: PermissionDecision): Promise<void>;
       setAppPermission(appName: string, level: PermissionLevel, appIdentity?: string): Promise<void>;
       onEvent(listener: (event: RuntimeEvent) => void): () => void;
+      onSnapshot(listener: (snapshot: AppSnapshot) => void): () => void;
     };
   }
 }

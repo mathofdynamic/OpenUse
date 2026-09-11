@@ -6,7 +6,7 @@
   "classification": "unknown",
   "repo": {
     "path": ".",
-    "head": "ec3ce3edaa3e57edbdd8f0aef9fefa458044897c",
+    "head": "9f737ac404978cf4e1972e14578371039513b3ff",
     "remote": null
   },
   "deployment_url": null,
@@ -14,11 +14,11 @@
   "deployment_identity_type": null,
   "deployment_identity_evidence": null,
   "brand": {
-    "version": "0.1.0",
-    "hash": "eec8986e323a236e650b253d5f460849a5821003d57239bfe49a21091a602c90",
+    "version": "0.2.0",
+    "hash": "65eee640c529bc50e101b2d04ef9dbbe4348b98c4d64c70bafe5367392b175e1",
     "approval_status": "confirmed"
   },
-  "active_run": "run-20260901T140910Z",
+  "active_run": "run-20260905T000000Z",
   "config_hash": "f372082048bd18111f7ad4586ddaa6dbe07e11c6f4144f00d835859d220f017a",
-  "updated_at": "2026-09-01T15:15:00Z"
+  "updated_at": "2026-09-05T00:00:00Z"
 }

@@ -20,6 +20,8 @@ public sealed class NativeControllerException(string code, string message) : Exc
 
 public sealed record Bounds(int X, int Y, int Width, int Height);
 
+public sealed record Point(int X, int Y);
+
 public sealed record AppInfo(string Id, string Name, string ProcessName, int ProcessId, string AppIdentity);
 
 public sealed record WindowInfo(
@@ -64,9 +66,13 @@ public sealed record OperationResult(
     WindowInfo? Window = null,
     string? Detail = null,
     string? InteractionMethod = null,
-    string? TargetElementId = null);
+    string? TargetElementId = null,
+    Point? TargetPoint = null,
+    Bounds? TargetBounds = null,
+    MonitorInfo? Display = null,
+    string? CoordinateSystem = null);
 
-public sealed record MonitorInfo(int Index, Bounds Bounds, Bounds WorkArea, int Dpi, bool Primary);
+public sealed record MonitorInfo(int Index, Bounds Bounds, Bounds WorkArea, int Dpi, bool Primary, double ScaleFactor = 1);
 
 public sealed record ScreenshotDiagnostics(int Width, int Height, int Dpi, string CoordinateSystem, Bounds CaptureBounds);
 

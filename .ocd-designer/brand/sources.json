@@ -1,10 +1,18 @@
 [
   {
-    "id": "SRC-OPENUSE-BRIEF",
+    "id": "SRC-OPENUSE-V02-BRIEF",
     "kind": "user_brief",
-    "title": "OpenUse MVP implementation brief",
+    "title": "OpenUse v0.2 full cross-platform product pass",
     "location": "conversation",
-    "captured_at": "2026-09-01T15:14:18Z",
-    "notes": "Product, safety, platform, and visual requirements supplied by the user; used as the source for the confirmed Brand Book."
+    "captured_at": "2026-09-05T00:00:00Z",
+    "notes": "Product, safety, cross-platform, responsive, appearance, model, cost, cursor, packaging, and qualification requirements supplied by the user; source for Brand Book v0.2."
+  },
+  {
+    "id": "SRC-OPENUSE-V02-IMPLEMENTATION",
+    "kind": "repository_evidence",
+    "title": "OpenUse v0.2 design system and qualification record",
+    "location": "docs/V0_2_DESIGN_SYSTEM.md;docs/V0_2_WINDOWS_QUALIFICATION.md",
+    "captured_at": "2026-09-05T00:00:00Z",
+    "notes": "Implementation and verification evidence; GUI results remain explicitly separated from build and native preflight evidence."
   }
 ]

@@ -1,9 +1,33 @@
-export type ProviderId = "vercel-gateway";
+export type NamedProviderId = "codex" | "claude" | "opencode";
+
+export type ProviderId = "vercel-gateway" | "custom-openai-compatible" | NamedProviderId;
+
+export type Locale = "en" | "fa";
+
+export type ReasoningEffort = "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+export interface PricingTier {
+  minTokens: number;
+  maxTokens?: number;
+  perToken: number;
+}
+
+export interface ModelPricing {
+  inputPerToken?: number;
+  outputPerToken?: number;
+  cacheReadPerToken?: number;
+  cacheWritePerToken?: number;
+  inputTiers?: PricingTier[];
+  outputTiers?: PricingTier[];
+  cacheReadTiers?: PricingTier[];
+  cacheWriteTiers?: PricingTier[];
+}
 
 export interface ModelCapabilities {
   toolCalling: boolean;
   vision: boolean;
   reasoning?: boolean;
+  reasoningEfforts?: ReasoningEffort[];
 }
 
 export interface ModelDefinition {
@@ -11,6 +35,37 @@ export interface ModelDefinition {
   label: string;
   provider: ProviderId;
   capabilities: ModelCapabilities;
+  sourceProvider?: string;
+  modelType?: string;
+  description?: string;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  createdAt?: string;
+  releasedAt?: string;
+  tags?: string[];
+  modalities?: { input: string[]; output: string[] };
+  pricing?: ModelPricing;
+}
+
+export interface NamedProviderSettings {
+  /** Optional executable override. The default is resolved from the user's PATH. */
+  executablePath: string;
+  /** Optional provider-native model ID. Empty means use the provider default. */
+  modelId: string;
+}
+
+export type NamedProviderSettingsMap = Record<NamedProviderId, NamedProviderSettings>;
+
+export type NamedProviderState = "checking" | "ready" | "not-installed" | "not-authenticated" | "error";
+
+export interface NamedProviderStatus {
+  id: NamedProviderId;
+  displayName: string;
+  state: NamedProviderState;
+  version?: string;
+  executablePath?: string;
+  detail: string;
+  checkedAt?: string;
 }
 
 export type AgentStatus = "idle" | "running" | "completed" | "stopped" | "error";
@@ -24,12 +79,30 @@ export type InteractionMethod =
   | "coordinate-input"
   | "keyboard-input";
 
+export type CursorInteraction = "move" | "click" | "double-click" | "drag" | "scroll" | "typing" | "waiting";
+
+export interface TargetPoint {
+  x: number;
+  y: number;
+}
+
+export interface CursorTarget {
+  point: TargetPoint;
+  bounds?: QualificationBounds;
+  display?: MonitorDiagnostics;
+  coordinateSystem: string;
+}
+
 export interface ActionTelemetry {
   interactionMethod?: InteractionMethod;
   targetApp?: string;
   targetWindowId?: string;
   targetWindowTitle?: string;
   targetElementId?: string;
+  targetPoint?: TargetPoint;
+  targetBounds?: QualificationBounds;
+  display?: MonitorDiagnostics;
+  coordinateSystem?: string;
   retryCount: number;
 }
 
@@ -174,16 +247,117 @@ export interface EngineStatus {
 }
 
 export interface AppSettings {
+  locale: Locale;
   provider: ProviderId;
   modelId: string;
   apiKeyConfigured: boolean;
   permissions: PermissionRecord[];
+  reasoningEffort: ReasoningEffort;
+  primaryColor: string;
+  backgroundBlur: number;
+  backgroundOpacity: number;
+  showAgentCursor: boolean;
+  customProvider: CustomProviderSettings;
+  namedProviders: NamedProviderSettingsMap;
+}
+
+export interface CustomProviderSettings {
+  baseUrl: string;
+  modelId: string;
+  apiKeyConfigured: boolean;
+  capabilities: ModelCapabilities;
+}
+
+export type ModelCatalogSource = "gateway-live" | "gateway-cache" | "bundled-fallback";
+
+export interface ModelCatalogStatus {
+  source: ModelCatalogSource;
+  fetchedAt?: string;
+  isRefreshing: boolean;
+  error?: string;
+  count: number;
+}
+
+export interface UsageModelSummary {
+  modelId: string;
+  provider: ProviderId;
+  requestCount: number;
+  taskCount: number;
+  knownSpend: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface UsageSummary {
+  totalKnownSpend: number;
+  totalTasks: number;
+  completedTasks: number;
+  inputTokens: number;
+  outputTokens: number;
+  knownCostRequests: number;
+  unpricedRequests: number;
+  averageTaskCost?: number;
+  modelUsage: UsageModelSummary[];
+  lastUpdatedAt?: string;
+}
+
+export type ThreadTaskStatus = "running" | "completed" | "stopped" | "error";
+
+export interface ThreadFolder {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ThreadTaskRecord {
+  id: string;
+  command: string;
+  modelId: string;
+  provider: ProviderId;
+  reasoningEffort: ReasoningEffort;
+  status: ThreadTaskStatus;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt?: string;
+  steps: number;
+  actions: number;
+  inputTokens: number;
+  outputTokens: number;
+  knownCost: number;
+  knownCostRequests: number;
+  unpricedRequests: number;
+  durationMs: number;
+}
+
+export interface ThreadRecord {
+  id: string;
+  title: string;
+  folderId?: string;
+  createdAt: string;
+  updatedAt: string;
+  tasks: ThreadTaskRecord[];
+  contextSummary?: string;
+  contextCompactedAt?: string;
+}
+
+export interface ThreadSnapshot {
+  currentThreadId: string;
+  threads: ThreadRecord[];
+  folders: ThreadFolder[];
 }
 
 export interface AppSnapshot {
   settings: AppSettings;
   engine: EngineStatus;
   qualification: QualificationSessionInfo;
+  modelCatalog: {
+    models: ModelDefinition[];
+    status: ModelCatalogStatus;
+  };
+  usage: UsageSummary;
+  threads: ThreadSnapshot;
+  namedProviders: NamedProviderStatus[];
 }
 
 export interface TimelineAction {
@@ -202,6 +376,10 @@ export interface TimelineAction {
   targetWindowId?: string;
   targetWindowTitle?: string;
   targetElementId?: string;
+  targetPoint?: TargetPoint;
+  targetBounds?: QualificationBounds;
+  display?: MonitorDiagnostics;
+  coordinateSystem?: string;
   retryCount?: number;
 }
 
@@ -209,6 +387,7 @@ export type RuntimeEvent =
   | {
       type: "task.started";
       taskId: string;
+      threadId?: string;
       command: string;
       modelId: string;
       capabilities: ModelCapabilities;
@@ -246,9 +425,22 @@ export type RuntimeEvent =
       taskId: string;
       step: number;
       modelId: string;
+      provider: ProviderId;
       inputTokens?: number;
       outputTokens?: number;
       totalTokens?: number;
+      reasoningEffort: ReasoningEffort;
+      actualCost?: number;
+      costSource: "gateway" | "estimated" | "unknown";
+      taskCost: number;
+      lifetimeSpend: number;
+      at: string;
+    }
+  | {
+      type: "cursor";
+      taskId: string;
+      interaction: CursorInteraction;
+      target?: CursorTarget;
       at: string;
     }
   | {

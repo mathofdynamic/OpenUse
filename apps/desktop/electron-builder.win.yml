@@ -1,0 +1,35 @@
+appId: com.openuse.app
+productName: OpenUse
+asar: true
+electronVersion: 43.4.1
+npmRebuild: false
+nodeGypRebuild: false
+buildDependenciesFromSource: false
+directories:
+  output: ../../dist/windows
+  buildResources: .build/windows
+files:
+  - dist/**/*
+  - package.json
+extraResources:
+  - from: ../../native/windows/publish
+    to: native/windows
+    filter:
+      - OpenUse.WindowsController.exe
+      - OpenUse.WindowsController.dll
+      - OpenUse.WindowsController.deps.json
+      - OpenUse.WindowsController.runtimeconfig.json
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: OpenUse.ico
+  artifactName: OpenUse-Setup-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: OpenUse

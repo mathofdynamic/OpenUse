@@ -16,7 +16,9 @@ export function logRuntimeEvent(event: RuntimeEvent, enabled: boolean): void {
       case "permission.resolved":
         return { type: event.type, taskId: event.taskId, requestId: event.requestId, decision: event.decision };
       case "model.usage":
-        return { type: event.type, taskId: event.taskId, step: event.step, modelId: event.modelId, inputTokens: event.inputTokens, outputTokens: event.outputTokens, totalTokens: event.totalTokens };
+        return { type: event.type, taskId: event.taskId, step: event.step, modelId: event.modelId, provider: event.provider, reasoningEffort: event.reasoningEffort, inputTokens: event.inputTokens, outputTokens: event.outputTokens, totalTokens: event.totalTokens, actualCost: event.actualCost, costSource: event.costSource };
+      case "cursor":
+        return { type: event.type, taskId: event.taskId, interaction: event.interaction, target: event.target ? { point: event.target.point, bounds: event.target.bounds, display: event.target.display, coordinateSystem: event.target.coordinateSystem } : undefined };
       case "action.completed":
         return { type: event.type, taskId: event.taskId, actionId: event.actionId, durationMs: event.durationMs, interactionMethod: event.telemetry?.interactionMethod, retryCount: event.telemetry?.retryCount };
       case "action.failed":

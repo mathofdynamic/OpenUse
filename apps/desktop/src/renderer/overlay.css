@@ -1,0 +1,17 @@
+@font-face { font-family: "OpenUse English"; src: url("./fonts/english/SF-Pro-Display-Bold.woff2") format("woff2"); font-weight: 600 700; font-style: normal; font-display: swap; }
+:root, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+* { box-sizing: border-box; }
+.agent-cursor-layer { position: fixed; inset: 0; pointer-events: none; }
+.agent-cursor { position: absolute; left: 0; top: 0; width: 34px; height: 34px; pointer-events: none; will-change: transform; }
+.agent-cursor-pointer { position: absolute; z-index: 2; left: 2px; top: 1px; width: 15px; height: 20px; background: var(--cursor-color); clip-path: polygon(0 0, 0 100%, 29% 72%, 52% 100%, 65% 91%, 42% 63%, 100% 61%); filter: drop-shadow(0 1px 2px rgba(0,0,0,.8)) drop-shadow(0 0 5px color-mix(in srgb, var(--cursor-color) 52%, transparent)); }
+.agent-cursor-pulse { position: absolute; left: -1px; top: -1px; width: 24px; height: 24px; border: 1px solid var(--cursor-color); border-radius: 50%; opacity: 0; transform: scale(.35); }
+.agent-cursor[data-interaction="click"] .agent-cursor-pulse-one, .agent-cursor[data-interaction="double-click"] .agent-cursor-pulse-one, .agent-cursor[data-interaction="drag"] .agent-cursor-pulse-one, .agent-cursor[data-interaction="typing"] .agent-cursor-pulse-one { animation: cursor-pulse 320ms ease-out 1; }
+.agent-cursor[data-interaction="double-click"] .agent-cursor-pulse-two { animation: cursor-pulse 320ms ease-out 1 130ms; }
+.agent-cursor[data-interaction="scroll"] .agent-cursor-pointer { animation: cursor-scroll 420ms ease-out 1; }
+.agent-cursor[data-interaction="typing"] .agent-cursor-pointer { animation: cursor-type 460ms ease-in-out 1; }
+.agent-cursor-label { position: absolute; left: 19px; top: 16px; padding: 2px 5px; color: var(--cursor-color); border: 1px solid color-mix(in srgb, var(--cursor-color) 60%, transparent); border-radius: 4px; background: rgba(0, 0, 0, .78); font: 600 9px/1.1 "OpenUse English", "Segoe UI", sans-serif; letter-spacing: .04em; opacity: 0; transform: translateY(2px); transition: opacity 140ms ease, transform 140ms ease; }
+.agent-cursor:hover .agent-cursor-label { opacity: .9; transform: translateY(0); }
+@keyframes cursor-pulse { 0% { opacity: .8; transform: scale(.35); } 100% { opacity: 0; transform: scale(1.25); } }
+@keyframes cursor-scroll { 0% { transform: translateY(0); } 35% { transform: translateY(5px); } 100% { transform: translateY(0); } }
+@keyframes cursor-type { 0%, 100% { opacity: 1; } 48% { opacity: .48; } }
+@media (prefers-reduced-motion: reduce) { .agent-cursor-pulse, .agent-cursor-pointer { animation: none !important; } }
