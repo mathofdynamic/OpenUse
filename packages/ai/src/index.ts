@@ -257,7 +257,7 @@ export function namedProviderModelDefinition(provider: NamedProviderId, configur
     capabilities: {
       toolCalling: true,
       vision: true,
-      reasoning: true,
+      reasoning: (info.reasoningEfforts?.length ?? 0) > 1,
       reasoningEfforts: info.reasoningEfforts,
     },
   };

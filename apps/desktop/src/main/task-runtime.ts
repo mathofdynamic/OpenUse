@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { ComputerUseAgent } from "@openuse/agent";
-import { CustomOpenAICompatibleProvider, GatewayModelProvider, customModelDefinition, getModelDefinition, namedProviderModelDefinition, resolveReasoningEffort } from "@openuse/ai";
+import { CustomOpenAICompatibleProvider, GatewayModelProvider, customModelDefinition, getModelDefinition, resolveReasoningEffort } from "@openuse/ai";
 import { NativeComputerController } from "@openuse/computer";
 import {
   InMemoryPermissionStore,
@@ -97,7 +97,7 @@ export class TaskRuntime {
     const model = providerId === "custom-openai-compatible"
       ? customModelDefinition({ baseUrl: stored.customProvider.baseUrl, modelId, capabilities: stored.customProvider.capabilities })
       : isNamedProvider(providerId)
-        ? namedProviderModelDefinition(providerId, stored.namedProviders[providerId].modelId)
+        ? this.options.namedProviders.modelDefinition(providerId, stored.namedProviders[providerId].modelId)
       : getModelDefinition(modelId, this.options.getModels());
     const capabilities = model?.capabilities ?? { toolCalling: false, vision: false };
     const reasoningEffort = resolveReasoningEffort(model, stored.reasoningEffort) ?? "provider-default";

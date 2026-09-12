@@ -3,7 +3,7 @@ import { ComputerUseAgent } from "@openuse/agent";
 import { MockComputerController } from "@openuse/computer";
 import { InMemoryPermissionStore, PermissionEngine } from "@openuse/permissions";
 import { OpenUseMcpBridge } from "./named-provider-mcp";
-import { extractNamedProviderVersion, parseNamedProviderAuthentication, parseNamedProviderUsage, providerDisplayName, providerSetupCommands } from "./named-provider-runtime";
+import { extractNamedProviderVersion, parseCodexModels, parseCodexQuota, parseNamedProviderAuthentication, parseNamedProviderUsage, parseOpenCodeModels, providerDisplayName, providerSetupCommands } from "./named-provider-runtime";
 
 const openBridges: OpenUseMcpBridge[] = [];
 
@@ -39,6 +39,46 @@ describe("named subscription runtime helpers", () => {
     expect(parseNamedProviderAuthentication("codex", { code: 0, stdout: "Logged in using ChatGPT", stderr: "" })).toBe(true);
     expect(parseNamedProviderAuthentication("claude", { code: 0, stdout: '{"loggedIn":true,"authMethod":"oauth"}', stderr: "" })).toBe(true);
     expect(parseNamedProviderAuthentication("claude", { code: 0, stdout: '{"loggedIn":false}', stderr: "" })).toBe(false);
+  });
+
+  it("parses Codex live models and preserves provider-reported reasoning support", () => {
+    const models = parseCodexModels({ data: [{ model: "gpt-6-astra", displayName: "GPT-6 Astra", isDefault: true, inputModalities: ["text", "image"], supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "high" }, { reasoningEffort: "ultra" }] }] });
+    expect(models[0]).toMatchObject({ id: "gpt-6-astra", label: "GPT-6 Astra", isDefault: true });
+    expect(models[0]?.capabilities).toMatchObject({ toolCalling: true, vision: true, reasoning: true, reasoningEfforts: ["provider-default", "low", "high"] });
+  });
+
+  it("does not claim configurable reasoning when Codex omits reasoning metadata", () => {
+    const models = parseCodexModels({ data: [{ model: "gpt-5.5", inputModalities: ["text", "image"] }] });
+    expect(models[0]?.capabilities).toMatchObject({ reasoning: false, reasoningEfforts: ["provider-default"] });
+  });
+
+  it("maps Codex primary and secondary windows to remaining 5-hour and weekly capacity", () => {
+    const quota = parseCodexQuota({ planType: "plus", rateLimits: { primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1789122974 }, secondary: { usedPercent: 44, windowDurationMins: 10080, resetsAt: 1789450487 } } }, "2026-09-11T00:00:00.000Z");
+    expect(quota?.windows).toEqual([
+      expect.objectContaining({ id: "primary", label: "5-hour", remainingPercent: 80, windowDurationMins: 300 }),
+      expect.objectContaining({ id: "secondary", label: "Weekly", remainingPercent: 56, windowDurationMins: 10080 }),
+    ]);
+  });
+
+  it("keeps OpenCode model IDs selectable without inventing provider pricing", () => {
+    const models = parseOpenCodeModels("Available models:\nopenai/gpt-5\nanthropic/claude-sonnet\n", "anthropic/claude-sonnet");
+    expect(models.map((model) => model.id)).toEqual(["openai/gpt-5", "anthropic/claude-sonnet"]);
+    expect(models[1]?.pricing).toBeUndefined();
+  });
+
+  it("parses OpenCode verbose metadata for capabilities, context, and reasoning variants", () => {
+    const models = parseOpenCodeModels(`openai/gpt-5\n${JSON.stringify({
+      name: "GPT 5",
+      attachment: true,
+      reasoning: true,
+      tool_call: true,
+      modalities: { input: ["text", "image"], output: ["text"] },
+      limit: { context: 128000, output: 16384 },
+      variants: { none: {}, low: {}, high: {}, max: {} },
+    }, null, 2)}\n`);
+    expect(models[0]).toMatchObject({ id: "openai/gpt-5", label: "GPT 5", contextWindow: 128000, maxOutputTokens: 16384 });
+    expect(models[0]?.capabilities).toMatchObject({ toolCalling: true, vision: true, reasoning: true, reasoningEfforts: ["provider-default", "none", "low", "high"] });
+    expect(models[0]?.pricing).toBeUndefined();
   });
 });
 

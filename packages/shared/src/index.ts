@@ -35,6 +35,8 @@ export interface ModelDefinition {
   label: string;
   provider: ProviderId;
   capabilities: ModelCapabilities;
+  /** Provider-reported default model for a named subscription runtime. */
+  isDefault?: boolean;
   sourceProvider?: string;
   modelType?: string;
   description?: string;
@@ -58,6 +60,23 @@ export type NamedProviderSettingsMap = Record<NamedProviderId, NamedProviderSett
 
 export type NamedProviderState = "checking" | "ready" | "not-installed" | "not-authenticated" | "error";
 
+export interface ProviderQuotaWindow {
+  id: string;
+  label: string;
+  usedPercent?: number;
+  remainingPercent?: number;
+  windowDurationMins?: number;
+  resetsAt?: string;
+}
+
+export interface ProviderQuotaSnapshot {
+  source: "codex-app-server" | "claude-agent-sdk" | "opencode-cli" | "unavailable";
+  observedAt: string;
+  plan?: string;
+  windows: ProviderQuotaWindow[];
+  unavailableReason?: string;
+}
+
 export interface NamedProviderStatus {
   id: NamedProviderId;
   displayName: string;
@@ -66,6 +85,8 @@ export interface NamedProviderStatus {
   executablePath?: string;
   detail: string;
   checkedAt?: string;
+  models: ModelDefinition[];
+  quota?: ProviderQuotaSnapshot;
 }
 
 export type AgentStatus = "idle" | "running" | "completed" | "stopped" | "error";

@@ -1,9 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createInterface } from "node:readline";
+import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { z } from "zod";
 import {
   COMPUTER_USE_INSTRUCTIONS,
   ComputerUseAgent,
@@ -14,9 +15,13 @@ import {
   type NamedProviderId,
   type NamedProviderSettings,
   type NamedProviderStatus,
+  type ModelDefinition,
+  type ProviderQuotaSnapshot,
+  type ProviderQuotaWindow,
   type ReasoningEffort,
   type RuntimeEvent,
 } from "@openuse/shared";
+import { namedProviderModelDefinition } from "@openuse/ai";
 import type { PersistedSettings } from "./settings-store";
 import { OpenUseMcpBridge } from "./named-provider-mcp";
 
@@ -60,6 +65,62 @@ const PROVIDER_SPECS: Record<NamedProviderId, ProviderSpec> = {
 };
 
 const PROVIDER_ORDER: NamedProviderId[] = ["codex", "claude", "opencode"];
+
+const codexReasoningEffortSchema = z.object({
+  reasoningEffort: z.string().optional(),
+  effort: z.string().optional(),
+}).passthrough();
+
+const codexModelSchema = z.object({
+  model: z.string().min(1),
+  displayName: z.string().optional(),
+  description: z.string().optional(),
+  supportedReasoningEfforts: z.array(z.union([z.string(), codexReasoningEffortSchema])).optional(),
+  defaultReasoningEffort: z.string().optional(),
+  inputModalities: z.array(z.string()).optional(),
+  hidden: z.boolean().optional(),
+  isDefault: z.boolean().optional(),
+}).passthrough();
+
+const codexModelListSchema = z.object({
+  data: z.array(codexModelSchema).optional(),
+  models: z.array(codexModelSchema).optional(),
+  nextCursor: z.string().nullable().optional(),
+}).passthrough();
+
+const codexQuotaWindowSchema = z.object({
+  usedPercent: z.number().optional(),
+  windowDurationMins: z.number().optional(),
+  resetsAt: z.number().optional(),
+}).passthrough();
+
+const codexRateLimitsSchema = z.object({
+  rateLimits: z.object({
+    primary: codexQuotaWindowSchema.optional(),
+    secondary: codexQuotaWindowSchema.optional(),
+  }).passthrough().optional(),
+  planType: z.string().optional(),
+}).passthrough();
+
+const openCodeModelSchema = z.object({
+  id: z.string().min(1).max(240).optional(),
+  name: z.string().max(240).optional(),
+  description: z.string().max(4_000).optional(),
+  family: z.string().max(160).optional(),
+  attachment: z.boolean().optional(),
+  reasoning: z.boolean().optional(),
+  tool_call: z.boolean().optional(),
+  toolCall: z.boolean().optional(),
+  modalities: z.object({ input: z.array(z.string().max(80)).max(32).optional(), output: z.array(z.string().max(80)).max(32).optional() }).passthrough().optional(),
+  capabilities: z.object({ tools: z.boolean().optional(), input: z.array(z.string().max(80)).max(32).optional(), output: z.array(z.string().max(80)).max(32).optional() }).passthrough().optional(),
+  cost: z.unknown().optional(),
+  limit: z.record(z.string(), z.unknown()).optional(),
+  variants: z.unknown().optional(),
+  status: z.string().max(40).optional(),
+  release_date: z.union([z.number(), z.string()]).optional(),
+  released: z.union([z.number(), z.string()]).optional(),
+  time: z.object({ released: z.union([z.number(), z.string()]).optional() }).passthrough().optional(),
+}).passthrough();
 
 export interface NamedProviderUsage {
   inputTokens?: number;
@@ -111,12 +172,26 @@ export class NamedProviderManager {
         displayName: spec.displayName,
         state: "checking",
         detail: `Checking the local ${spec.displayName} runtime.`,
+        models: [],
       });
     }
   }
 
   snapshot(): NamedProviderStatus[] {
-    return PROVIDER_ORDER.map((provider) => ({ ...this.statuses.get(provider)! }));
+    return PROVIDER_ORDER.map((provider) => {
+      const status = this.statuses.get(provider)!;
+      return { ...status, models: status.models.map((model) => ({ ...model, capabilities: { ...model.capabilities, reasoningEfforts: model.capabilities.reasoningEfforts ? [...model.capabilities.reasoningEfforts] : undefined } })) };
+    });
+  }
+
+  modelDefinition(provider: NamedProviderId, configuredModelId = ""): ModelDefinition {
+    const status = this.statuses.get(provider);
+    const selected = configuredModelId
+      ? status?.models.find((model) => model.id === configuredModelId)
+      : status?.models.find((model) => model.isDefault) ?? status?.models[0];
+    if (selected) return selected;
+    if (configuredModelId && status?.models.length) return unlistedNamedProviderModelDefinition(provider, configuredModelId);
+    return namedProviderModelDefinition(provider, configuredModelId);
   }
 
   async refresh(provider?: NamedProviderId): Promise<void> {
@@ -314,9 +389,12 @@ export class NamedProviderManager {
         },
       },
     });
+    const args = ["--pure", "run", "--format", "json", "--agent", "openuse", ...(options.modelId && options.modelId !== "default" ? ["--model", options.modelId] : [])];
+    appendOpenCodeReasoning(args, options.reasoningEffort);
+    args.push(prompt);
     return {
       command: resolved.executable,
-      args: [...resolved.prefixArgs, "--pure", "run", "--format", "json", "--agent", "openuse", ...(options.modelId && options.modelId !== "default" ? ["--model", options.modelId] : []), prompt],
+      args: [...resolved.prefixArgs, ...args],
       env,
     };
   }
@@ -327,11 +405,11 @@ export class NamedProviderManager {
     const resolved = await resolveProviderCommand(provider, configured);
     const checkedAt = nowIso();
     if (!resolved) {
-      return { id: provider, displayName: spec.displayName, state: "not-installed", detail: `Install ${spec.displayName} and run ${spec.loginCommand} before using this subscription.`, checkedAt };
+      return { id: provider, displayName: spec.displayName, state: "not-installed", detail: `Install ${spec.displayName} and run ${spec.loginCommand} before using this subscription.`, checkedAt, models: [] };
     }
     const auth = await runCommand(resolved.executable, [...resolved.prefixArgs, ...spec.authArgs], STATUS_TIMEOUT_MS);
     const authenticated = parseNamedProviderAuthentication(provider, auth);
-    return {
+    const baseStatus: NamedProviderStatus = {
       id: provider,
       displayName: spec.displayName,
       state: authenticated ? "ready" : auth.spawnError ? "error" : "not-authenticated",
@@ -339,8 +417,355 @@ export class NamedProviderManager {
       executablePath: resolved.displayPath,
       detail: authenticated ? `${spec.displayName} subscription is authenticated.` : `Run ${spec.loginCommand}, then check the connection again.`,
       checkedAt,
+      models: [],
     };
+    if (!authenticated) return baseStatus;
+
+    try {
+      const enrichment = provider === "codex"
+        ? await readCodexSubscription(resolved)
+        : provider === "opencode"
+          ? await readOpenCodeModels(resolved, configured.modelId)
+          : { models: fallbackNamedProviderModels(provider, configured.modelId) };
+      return { ...baseStatus, models: enrichment.models, ...(enrichment.quota ? { quota: enrichment.quota } : {}) };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "The provider did not return a valid model or usage snapshot.";
+      return {
+        ...baseStatus,
+        models: fallbackNamedProviderModels(provider, configured.modelId),
+        quota: { source: "unavailable", observedAt: nowIso(), windows: [], unavailableReason: reason },
+        detail: `${baseStatus.detail} Model and limit details are temporarily unavailable.`,
+      };
+    }
   }
+}
+
+interface ProviderEnrichment {
+  models: ModelDefinition[];
+  quota?: ProviderQuotaSnapshot;
+}
+
+interface CodexRpcEnvelope {
+  id?: unknown;
+  result?: unknown;
+  error?: { message?: string };
+}
+
+export function parseCodexModels(value: unknown): ModelDefinition[] {
+  const parsed = codexModelListSchema.safeParse(value);
+  if (!parsed.success) return [];
+  const records = parsed.data.data ?? parsed.data.models ?? [];
+  return records
+    .filter((record) => record.hidden !== true)
+    .map((record) => {
+      const efforts = normalizeReasoningEfforts(record.supportedReasoningEfforts);
+      const modalities = record.inputModalities ?? [];
+      const supportsReasoning = efforts.length > 1;
+      return {
+        id: record.model,
+        label: record.displayName?.trim() || record.model,
+        provider: "codex",
+        sourceProvider: "OpenAI Codex",
+        modelType: "language",
+        description: record.description,
+        isDefault: record.isDefault === true,
+        capabilities: {
+          toolCalling: true,
+          vision: modalities.some((modality) => /image|vision/i.test(modality)),
+          reasoning: supportsReasoning,
+          reasoningEfforts: efforts,
+        },
+        modalities: { input: modalities, output: ["text"] },
+      } satisfies ModelDefinition;
+    });
+}
+
+export function parseCodexQuota(value: unknown, observedAt = nowIso()): ProviderQuotaSnapshot | undefined {
+  const parsed = codexRateLimitsSchema.safeParse(value);
+  if (!parsed.success || !parsed.data.rateLimits) return undefined;
+  const windows: ProviderQuotaWindow[] = [];
+  const addWindow = (id: "primary" | "secondary", label: string, value: z.infer<typeof codexQuotaWindowSchema> | undefined) => {
+    if (!value || !Number.isFinite(value.usedPercent)) return;
+    const usedPercent = Math.min(100, Math.max(0, value.usedPercent ?? 0));
+    const resetsAt = typeof value.resetsAt === "number" && Number.isFinite(value.resetsAt)
+      ? new Date((value.resetsAt > 10_000_000_000 ? value.resetsAt : value.resetsAt * 1000)).toISOString()
+      : undefined;
+    windows.push({ id, label, usedPercent, remainingPercent: 100 - usedPercent, windowDurationMins: value.windowDurationMins, resetsAt });
+  };
+  addWindow("primary", "5-hour", parsed.data.rateLimits.primary);
+  addWindow("secondary", "Weekly", parsed.data.rateLimits.secondary);
+  return windows.length > 0 ? { source: "codex-app-server", observedAt, ...(parsed.data.planType ? { plan: parsed.data.planType } : {}), windows } : undefined;
+}
+
+export function parseOpenCodeModels(stdout: string, configuredModelId = ""): ModelDefinition[] {
+  const records = parseOpenCodeModelRecords(stdout);
+  const models = records.map((record, index) => openCodeModelDefinition(record.id, record.metadata, configuredModelId ? record.id === configuredModelId : index === 0));
+  if (configuredModelId && !models.some((model) => model.id === configuredModelId)) {
+    models.unshift(openCodeModelDefinition(configuredModelId, undefined, true));
+  }
+  return models;
+}
+
+const OPEN_CODE_MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:@+-]*$/i;
+const OPEN_CODE_REASONING_EFFORTS: ReasoningEffort[] = ["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"];
+
+type OpenCodeModelMetadata = z.infer<typeof openCodeModelSchema>;
+
+interface OpenCodeModelRecord {
+  id: string;
+  metadata?: OpenCodeModelMetadata;
+}
+
+function parseOpenCodeModelRecords(stdout: string): OpenCodeModelRecord[] {
+  const text = stripAnsi(stdout);
+  const lines = text.split(/\r?\n/);
+  const records: OpenCodeModelRecord[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    const id = line.trim();
+    const lineEnd = offset + line.length;
+    if (OPEN_CODE_MODEL_ID_PATTERN.test(id) && !records.some((record) => record.id === id)) {
+      let metadata: OpenCodeModelMetadata | undefined;
+      let metadataOffset = lineEnd;
+      if (text.startsWith("\r\n", metadataOffset)) metadataOffset += 2;
+      else if (text[metadataOffset] === "\n") metadataOffset += 1;
+      while (metadataOffset < text.length && /\s/.test(text[metadataOffset] ?? "")) metadataOffset += 1;
+      const parsed = parseJsonValueAt(text, metadataOffset);
+      if (parsed && parsed.value && typeof parsed.value === "object" && !Array.isArray(parsed.value)) {
+        const validated = openCodeModelSchema.safeParse(parsed.value);
+        if (validated.success) metadata = validated.data;
+      }
+      records.push({ id, metadata });
+    }
+    offset = lineEnd + (text.startsWith("\r\n", lineEnd) ? 2 : text[lineEnd] === "\n" ? 1 : 0);
+  }
+  return records;
+}
+
+function stripAnsi(value: string): string {
+  let result = "";
+  for (let index = 0; index < value.length; index += 1) {
+    if (value.charCodeAt(index) !== 27) {
+      result += value[index];
+      continue;
+    }
+    if (value[index + 1] !== "[") continue;
+    index += 2;
+    while (index < value.length) {
+      const code = value.charCodeAt(index);
+      if (code >= 0x40 && code <= 0x7e) break;
+      index += 1;
+    }
+  }
+  return result;
+}
+
+function parseJsonValueAt(text: string, start: number): { value: unknown; end: number } | undefined {
+  const opening = text[start];
+  if (opening !== "{" && opening !== "[") return undefined;
+  const closing = opening === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const character = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === opening) depth += 1;
+    else if (character === closing) {
+      depth -= 1;
+      if (depth !== 0) continue;
+      try {
+        return { value: JSON.parse(text.slice(start, index + 1)) as unknown, end: index + 1 };
+      } catch {
+        return undefined;
+      }
+    }
+  }
+  return undefined;
+}
+
+function openCodeModelDefinition(id: string, metadata: OpenCodeModelMetadata | undefined, isDefault: boolean): ModelDefinition {
+  const [source] = id.split("/", 1);
+  const inputModalities = metadata?.modalities?.input ?? metadata?.capabilities?.input ?? [];
+  const outputModalities = metadata?.modalities?.output ?? metadata?.capabilities?.output ?? ["text"];
+  const reasoningEfforts = parseOpenCodeReasoningEfforts(metadata?.variants);
+  const toolCalling = metadata?.tool_call === true || metadata?.toolCall === true || metadata?.capabilities?.tools === true;
+  const vision = metadata?.attachment === true || inputModalities.some((modality) => /image|vision|video/i.test(modality));
+  const label = metadata?.name?.trim() || id;
+  const contextWindow = openCodeNumber(metadata?.limit?.context);
+  const maxOutputTokens = openCodeNumber(metadata?.limit?.output);
+  const releasedAt = openCodeTimestamp(metadata?.release_date ?? metadata?.released ?? metadata?.time?.released);
+  return {
+    id,
+    label,
+    provider: "opencode",
+    sourceProvider: `OpenCode / ${source}`,
+    modelType: "language",
+    isDefault,
+    description: metadata?.description?.trim() || (metadata ? "Model metadata reported by the authenticated OpenCode runtime." : "OpenCode did not return metadata for this exact model ID."),
+    ...(contextWindow === undefined ? {} : { contextWindow }),
+    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+    ...(releasedAt === undefined ? {} : { releasedAt }),
+    modalities: { input: inputModalities, output: outputModalities },
+    capabilities: {
+      toolCalling,
+      vision,
+      reasoning: reasoningEfforts.length > 1,
+      reasoningEfforts,
+    },
+  } satisfies ModelDefinition;
+}
+
+function parseOpenCodeReasoningEfforts(value: unknown): ReasoningEffort[] {
+  const values = new Set<ReasoningEffort>(["provider-default"]);
+  const add = (candidate: unknown) => {
+    if (typeof candidate !== "string") return;
+    const normalized = candidate.trim().toLowerCase() as ReasoningEffort;
+    if (OPEN_CODE_REASONING_EFFORTS.includes(normalized)) values.add(normalized);
+  };
+  if (Array.isArray(value)) {
+    for (const item of value) add(item);
+  } else if (value && typeof value === "object") {
+    for (const key of Object.keys(value)) add(key);
+  }
+  return OPEN_CODE_REASONING_EFFORTS.filter((effort) => values.has(effort));
+}
+
+function openCodeNumber(value: unknown): number | undefined {
+  const number = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(number) && number >= 0 ? number : undefined;
+}
+
+function openCodeTimestamp(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value;
+  const number = openCodeNumber(value);
+  if (number === undefined) return undefined;
+  const date = new Date(number < 10_000_000_000 ? number * 1_000 : number);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+function normalizeReasoningEfforts(values: Array<string | { reasoningEffort?: string; effort?: string }> | undefined): ReasoningEffort[] {
+  const allowed = new Set<ReasoningEffort>(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"]);
+  const result: ReasoningEffort[] = ["provider-default"];
+  for (const value of values ?? []) {
+    const candidate = typeof value === "string" ? value : value.reasoningEffort ?? value.effort;
+    if (!candidate) continue;
+    const normalized = candidate.toLowerCase() as ReasoningEffort;
+    if (allowed.has(normalized) && !result.includes(normalized)) result.push(normalized);
+  }
+  return result;
+}
+
+function fallbackNamedProviderModels(provider: NamedProviderId, configuredModelId: string): ModelDefinition[] {
+  if (configuredModelId) return [namedProviderModelDefinition(provider, configuredModelId)];
+  if (provider === "claude") {
+    return [
+      { ...namedProviderModelDefinition(provider, "sonnet"), id: "sonnet", label: "Claude Sonnet", isDefault: true },
+      { ...namedProviderModelDefinition(provider, "opus"), id: "opus", label: "Claude Opus" },
+      { ...namedProviderModelDefinition(provider, "haiku"), id: "haiku", label: "Claude Haiku" },
+    ];
+  }
+  return [namedProviderModelDefinition(provider)];
+}
+
+function unlistedNamedProviderModelDefinition(provider: NamedProviderId, configuredModelId: string): ModelDefinition {
+  const base = namedProviderModelDefinition(provider, configuredModelId);
+  return {
+    ...base,
+    capabilities: { toolCalling: false, vision: false, reasoning: false, reasoningEfforts: ["provider-default"] },
+    description: "This exact model ID was not reported by the provider. Choose a live model or refresh the subscription before running Computer Use.",
+  };
+}
+
+async function readCodexSubscription(resolved: ResolvedCommand): Promise<ProviderEnrichment> {
+  let child: ChildProcessWithoutNullStreams | undefined;
+  let lines: ReadlineInterface | undefined;
+  try {
+    child = spawn(resolved.executable, [...resolved.prefixArgs, "app-server", "--stdio"], {
+      cwd: tmpdir(),
+      env: { ...process.env, NO_COLOR: "1" },
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    child.stderr.on("data", () => undefined);
+    lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+    await sendCodexRpcRequest(child, lines, 1, "initialize", {
+      clientInfo: { name: "openuse", title: "OpenUse", version: "0.2.0" },
+      capabilities: { experimentalApi: true },
+    });
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} })}\n`);
+
+    const records: ModelDefinition[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 16; page += 1) {
+      const result = await sendCodexRpcRequest(child, lines, page + 2, "model/list", cursor ? { cursor } : {});
+      const parsed = codexModelListSchema.safeParse(result);
+      if (!parsed.success) break;
+      records.push(...parseCodexModels(parsed.data));
+      cursor = parsed.data.nextCursor ?? undefined;
+      if (!cursor) break;
+    }
+    const quotaResult = await sendCodexRpcRequest(child, lines, 100, "account/rateLimits/read", {});
+    return {
+      models: records.length > 0 ? records : fallbackNamedProviderModels("codex", ""),
+      quota: parseCodexQuota(quotaResult) ?? { source: "unavailable", observedAt: nowIso(), windows: [], unavailableReason: "Codex did not report subscription limits." },
+    };
+  } finally {
+    lines?.close();
+    if (child && child.exitCode === null) await terminateChild(child);
+  }
+}
+
+async function readOpenCodeModels(resolved: ResolvedCommand, configuredModelId: string): Promise<ProviderEnrichment> {
+  const verboseResult = await runCommand(resolved.executable, [...resolved.prefixArgs, "--pure", "models", "--verbose"], STATUS_TIMEOUT_MS);
+  const result = !verboseResult.spawnError && verboseResult.code === 0
+    ? verboseResult
+    : await runCommand(resolved.executable, [...resolved.prefixArgs, "models"], STATUS_TIMEOUT_MS);
+  if (result.spawnError || result.code !== 0) throw result.spawnError ?? new Error("OpenCode did not return its model list.");
+  const models = parseOpenCodeModels(result.stdout, configuredModelId);
+  return { models: models.length > 0 ? models : fallbackNamedProviderModels("opencode", configuredModelId) };
+}
+
+function sendCodexRpcRequest(child: ChildProcessWithoutNullStreams, lines: ReadlineInterface, id: number, method: string, params: unknown): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      lines.off("line", onLine);
+      child.off("error", onError);
+    };
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+    const onLine = (line: string) => {
+      let parsed: CodexRpcEnvelope;
+      try { parsed = JSON.parse(line) as CodexRpcEnvelope; } catch { return; }
+      if (parsed.id !== id) return;
+      if (parsed.error) finish(() => reject(new Error(parsed.error?.message ?? `Codex ${method} failed.`)));
+      else finish(() => resolve(parsed.result));
+    };
+    const onError = (error: Error) => finish(() => reject(error));
+    const timer = setTimeout(() => finish(() => reject(new Error(`Timed out waiting for Codex ${method}.`))), STATUS_TIMEOUT_MS);
+    lines.on("line", onLine);
+    child.once("error", onError);
+    try {
+      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    } catch (error) {
+      finish(() => reject(error instanceof Error ? error : new Error(`Could not send Codex ${method}.`)));
+    }
+  });
 }
 
 export function providerDisplayName(provider: NamedProviderId): string {
@@ -472,13 +897,18 @@ function providerPrompt(command: string, threadContext?: string): string {
 }
 
 function appendCodexReasoning(args: string[], effort: ReasoningEffort): void {
-  if (effort === "provider-default" || effort === "none" || effort === "minimal") return;
+  if (effort === "provider-default") return;
   args.push("-c", `model_reasoning_effort=${JSON.stringify(effort)}`);
 }
 
 function appendClaudeReasoning(args: string[], effort: ReasoningEffort): void {
   if (effort === "provider-default" || effort === "none" || effort === "minimal") return;
   args.push("--effort", effort === "xhigh" ? "xhigh" : effort);
+}
+
+function appendOpenCodeReasoning(args: string[], effort: ReasoningEffort): void {
+  if (effort === "provider-default") return;
+  args.push("--variant", effort);
 }
 
 async function createTemporaryDirectory(): Promise<string> {

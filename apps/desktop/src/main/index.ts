@@ -407,6 +407,9 @@ async function bootstrap(): Promise<void> {
       if (event.type === "task.started" || event.type === "task.finished") {
         if (event.type === "task.finished") cursorOverlay?.hideAfterTask();
         void publicSnapshot().then((snapshot) => mainWindow?.webContents.send("openuse:snapshot", snapshot));
+        if (event.type === "task.finished" && (settings.persisted.provider === "codex" || settings.persisted.provider === "claude" || settings.persisted.provider === "opencode")) {
+          void namedProviders.refresh(settings.persisted.provider).then(() => publicSnapshot()).then((snapshot) => mainWindow?.webContents.send("openuse:snapshot", snapshot)).catch(() => undefined);
+        }
       }
       mainWindow?.webContents.send("openuse:event", event);
     },
