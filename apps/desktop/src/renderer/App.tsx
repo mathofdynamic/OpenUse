@@ -266,7 +266,6 @@ export function App() {
   const platformLabel = platformName(locale, engine.platform);
   const starterCommandList = starterCommands(locale, engine.platform);
   const nativePermissionsReady = engine.platform !== "darwin" || selfTest?.ok === true;
-  const controlReady = engine.state === "ready" && nativePermissionsReady;
   const providerConfigured = settings.provider === "vercel-gateway"
     ? settings.apiKeyConfigured
       : settings.provider === "custom-openai-compatible"
@@ -443,27 +442,18 @@ export function App() {
       <div className={`app-shell ${locale === "fa" ? "app-shell-rtl" : ""}`} dir={locale === "fa" ? "rtl" : "ltr"}>
       <div className="material-layer" aria-hidden="true" />
       <aside className="side-rail" aria-label={t("OpenUse navigation")}>
-        <BrandLockup />
         <div className="rail-section">
           <div className="rail-label">{t("Workspace")}</div>
           <button className="rail-link rail-link-active" type="button"><Glyph name="activity" /><span>{t("Control room")}</span></button>
           <button className="rail-link" type="button" disabled={isRunning} onClick={() => setSettingsOpen(true)}><Glyph name="sliders" /><span>{t("Settings")}</span></button>
         </div>
-        <ThreadRailSection thread={currentThread} folder={currentFolder} open={threadPanelOpen} disabled={isRunning} onToggle={() => setThreadPanelOpen((current) => !current)} onNew={createNewThread}>
-          {threadPanelOpen && <ThreadPanel variant="rail" snapshot={threadSnapshot} selectedFolder={folderFilter} folderFormOpen={folderFormOpen} folderName={folderNameDraft} disabled={isRunning} onFolderFilter={setFolderFilter} onFolderForm={() => setFolderFormOpen((current) => !current)} onFolderName={setFolderNameDraft} onCreateFolder={() => void createThreadFolder()} onCancelFolder={() => { setFolderFormOpen(false); setFolderNameDraft(""); }} onSelectThread={(threadId) => void selectThread(threadId)} onMoveThread={(threadId, folderId) => void moveThread(threadId, folderId)} onNew={createNewThread} />}
+        <ThreadRailSection disabled={isRunning} onNew={createNewThread}>
+          <ThreadPanel variant="rail" snapshot={threadSnapshot} selectedFolder={folderFilter} folderFormOpen={folderFormOpen} folderName={folderNameDraft} disabled={isRunning} onFolderFilter={setFolderFilter} onFolderForm={() => setFolderFormOpen((current) => !current)} onFolderName={setFolderNameDraft} onCreateFolder={() => void createThreadFolder()} onCancelFolder={() => { setFolderFormOpen(false); setFolderNameDraft(""); }} onSelectThread={(threadId) => void selectThread(threadId)} onMoveThread={(threadId, folderId) => void moveThread(threadId, folderId)} onNew={createNewThread} />
         </ThreadRailSection>
-        <div className="rail-spacer" />
-        <div className="rail-note">
-          <div className="rail-note-heading"><span className={`status-dot ${controlReady ? "status-ready" : `status-${engine.state}`}`} />{t("Local runtime")}</div>
-          <p>{controlReady ? t("{platform} control is connected.", { platform: platformLabel }) : engine.platform === "darwin" && selfTest && !selfTest.ok ? t("macOS permissions are required.") : localizeRuntimeText(locale, engine.detail)}</p>
-          <div className="rail-version">{t("OpenUse 0.2.0 / {platform}", { platform: platformLabel })}</div>
-        </div>
       </aside>
 
       <main className="main-column">
         <header className="topbar app-header" aria-label={t("OpenUse header")}>
-          <div className="topbar-brand"><div className="brand-mark small" aria-hidden="true"><span /></div><div><div className="topbar-brand-name">OpenUse</div><div className="topbar-brand-caption">{t("Control room")}</div></div></div>
-          <div className="topbar-context"><span className={`status-dot ${controlReady ? "status-ready" : `status-${engine.state}`}`} /><span>{controlReady ? t("{platform} control ready", { platform: platformLabel }) : engine.platform === "darwin" && selfTest && !selfTest.ok ? t("{platform} permission required", { platform: platformLabel }) : engine.state === "unsupported" ? t("{platform} control unavailable", { platform: platformLabel }) : t("{platform} control offline", { platform: platformLabel })}</span></div>
           <div className="topbar-actions">
             {settings.provider === "vercel-gateway" ? <ModelPicker models={models} value={settings.modelId} onSelect={(modelId) => void runtimeApi.setModel(modelId).then(applySnapshot)} compact disabled={isRunning} /> : activeNamedProvider ? <NamedModelPicker models={activeNamedStatus?.models ?? []} value={effectiveNamedModelId} onSelect={(modelId) => void runtimeApi.setNamedProvider(activeNamedProvider, { modelId }).then(applySnapshot)} compact disabled={isRunning} /> : <div className="topbar-provider-model"><strong>{activeModel.label}</strong><small>{providerLabel(locale, settings.provider)}</small></div>}
             <div className="topbar-reasoning"><span>{t("Reasoning")}</span><ReasoningSelect model={activeModel} value={effectiveReasoning} onChange={updateReasoning} compact disabled={isRunning} /></div>
@@ -558,15 +548,10 @@ function handleRuntimeEvent(event: RuntimeEvent, setters: {
   }
 }
 
-function ThreadRailSection({ thread, folder, open, disabled, onToggle, onNew, children }: { thread: ThreadRecord; folder?: ThreadFolder; open: boolean; disabled?: boolean; onToggle(): void; onNew(): void; children?: ReactNode }) {
+function ThreadRailSection({ disabled, onNew, children }: { disabled?: boolean; onNew(): void; children?: ReactNode }) {
   const { t } = useTranslation();
-  return <section className={`thread-rail-section ${open ? "thread-rail-section-open" : ""}`} aria-label={t("Threads")}>
+  return <section className="thread-rail-section" aria-label={t("Threads")}>
     <div className="thread-rail-header"><div className="rail-label">{t("Threads")}</div><button className="thread-rail-new" type="button" aria-label={t("New thread")} disabled={disabled} onClick={onNew}><Glyph name="plus" /></button></div>
-    <button className="thread-rail-current" type="button" aria-haspopup="dialog" aria-expanded={open} disabled={disabled} onClick={onToggle}>
-      <span className="thread-rail-current-dot" aria-hidden="true" />
-      <span className="thread-rail-copy"><strong>{thread.title}</strong><small>{folder?.name ?? t("Unfiled")}</small></span>
-      <Glyph name="chevron" />
-    </button>
     {children}
   </section>;
 }
@@ -602,7 +587,7 @@ function ThreadPanel({ variant, snapshot, selectedFolder, folderFormOpen, folder
   const { locale, t } = useTranslation();
   const visibleThreads = snapshot.threads.filter((thread) => selectedFolder === "all" || thread.folderId === selectedFolder);
   const folderOptions: ThemedSelectOption[] = [{ value: "none", label: t("No folder") }, ...snapshot.folders.map((folder) => ({ value: folder.id, label: folder.name }))];
-  return <section className={`thread-panel thread-panel-${variant}`} role="dialog" aria-label={t("Threads")}>
+  return <section className={`thread-panel thread-panel-${variant}`} role={variant === "rail" ? "region" : "dialog"} aria-label={t("Threads")}>
     <div className="thread-panel-header"><div className="thread-panel-title"><Glyph name="activity" /><strong>{t("{count} threads", { count: snapshot.threads.length })}</strong></div><button className="icon-button thread-folder-button" type="button" aria-label={t("New folder")} title={t("New folder")} disabled={disabled} onClick={onFolderForm}><Glyph name="plus" /></button></div>
     {folderFormOpen && <form className="thread-folder-form" onSubmit={(event) => { event.preventDefault(); onCreateFolder(); }}><input autoFocus value={folderName} onChange={(event) => onFolderName(event.target.value)} placeholder={t("Folder name")} aria-label={t("Folder name")} maxLength={80} /><button className="primary-action" type="submit" disabled={!folderName.trim()}>{t("Create folder")}</button><button className="secondary-action" type="button" onClick={onCancelFolder}>{t("Cancel")}</button></form>}
     <div className="thread-folder-tabs" role="tablist" aria-label={t("Thread folders")}><button className={selectedFolder === "all" ? "thread-folder-tab-active" : ""} type="button" onClick={() => onFolderFilter("all")}>{t("All threads")}</button>{snapshot.folders.map((folder) => <button className={selectedFolder === folder.id ? "thread-folder-tab-active" : ""} type="button" key={folder.id} onClick={() => onFolderFilter(folder.id)}>{folder.name}</button>)}</div>
@@ -622,8 +607,6 @@ function ThreadHistory({ thread, onContinue }: { thread: ThreadRecord; onContinu
   const tasks = [...thread.tasks].reverse();
   return <div className="thread-history"><div className="thread-history-heading"><div><div className="dialog-eyebrow">{t("Task history")}</div><strong>{thread.title}</strong></div>{thread.contextCompactedAt && <span className="thread-compacted-note">{t("Context compacted")}</span>}</div>{tasks.map((task) => <article className="thread-task-card" key={task.id}><div className="thread-task-card-top"><span>{t("Task")}</span><span className={`thread-task-status thread-task-status-${task.status}`}>{statusLabel(locale, task.status)}</span></div><p>{task.command}</p><div className="thread-task-meta"><span>{task.modelId}</span><span>{task.actions} {t("actions")}</span><span>{task.steps} {t("steps")}</span><span>{formatDuration(locale, task.durationMs)}</span></div></article>)}<button className="thread-continue-button" type="button" onClick={onContinue}>{t("Continue in this thread")} <Glyph name="arrow" /></button></div>;
 }
-
-function BrandLockup() { const { t } = useTranslation(); return <div className="brand-lockup"><div className="brand-mark" aria-hidden="true"><span /></div><div><div className="brand-name">OpenUse</div><div className="brand-caption">{t("computer runtime")}</div></div></div>; }
 
 function MacPermissionSetup({ selfTest }: { selfTest: EngineSelfTestResult }) {
   const { locale, t } = useTranslation();
