@@ -246,6 +246,12 @@ function installIpc(): void {
     await threads.selectThread(threadIdSchema.parse(raw).threadId);
     return publicSnapshot();
   });
+  ipcMain.handle("openuse:delete-thread", async (event, raw: unknown) => {
+    assertSender(event);
+    if (runtime.isRunning) throw new OpenUseError("UNSUPPORTED_ACTION", "Stop the current task before deleting a thread.");
+    await threads.deleteThread(threadIdSchema.parse(raw).threadId);
+    return publicSnapshot();
+  });
   ipcMain.handle("openuse:create-thread-folder", async (event, raw: unknown) => {
     assertSender(event);
     if (runtime.isRunning) throw new OpenUseError("UNSUPPORTED_ACTION", "Stop the current task before changing thread folders.");

@@ -23,6 +23,7 @@ declare global {
       startTask(command: string, threadId: string): Promise<void>;
       createThread(): Promise<AppSnapshot>;
       selectThread(threadId: string): Promise<AppSnapshot>;
+      deleteThread(threadId: string): Promise<AppSnapshot>;
       createThreadFolder(name: string): Promise<AppSnapshot>;
       moveThread(threadId: string, folderId?: string): Promise<AppSnapshot>;
       stopTask(): Promise<void>;

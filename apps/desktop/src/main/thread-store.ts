@@ -275,6 +275,23 @@ export class ThreadStore {
     return this.snapshot();
   }
 
+  async deleteThread(threadId: string): Promise<ThreadSnapshot> {
+    const index = this.value.threads.findIndex((thread) => thread.id === threadId);
+    if (index < 0) throw new Error("The selected thread no longer exists.");
+    const [deleted] = this.value.threads.splice(index, 1);
+    for (const task of deleted.tasks) this.taskToThread.delete(task.id);
+
+    if (this.value.threads.length === 0) {
+      const replacement = createDefaultThread();
+      this.value.threads = [replacement];
+      this.value.currentThreadId = replacement.id;
+    } else if (this.value.currentThreadId === threadId) {
+      this.value.currentThreadId = this.value.threads[Math.min(index, this.value.threads.length - 1)].id;
+    }
+    await this.persist();
+    return this.snapshot();
+  }
+
   async createFolder(name: string): Promise<ThreadSnapshot> {
     const normalized = boundedString(name, "", MAX_FOLDER_NAME);
     if (!normalized) throw new Error("Folder name cannot be empty.");

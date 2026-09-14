@@ -66,4 +66,25 @@ describe("thread history store", () => {
     expect(context).toContain("Task 6");
     expect(context.length).toBeLessThanOrEqual(6_000);
   });
+
+  it("deletes a thread, selects a remaining thread, and keeps one replacement thread", async () => {
+    const { store, path } = await createStore();
+    const firstThreadId = store.snapshot().currentThreadId;
+    const secondSnapshot = await store.createThread();
+    const secondThreadId = secondSnapshot.currentThreadId;
+
+    const afterCurrentDelete = await store.deleteThread(secondThreadId);
+    expect(afterCurrentDelete.threads.map((thread) => thread.id)).toEqual([firstThreadId]);
+    expect(afterCurrentDelete.currentThreadId).toBe(firstThreadId);
+
+    const afterLastDelete = await store.deleteThread(firstThreadId);
+    expect(afterLastDelete.threads).toHaveLength(1);
+    expect(afterLastDelete.threads[0].id).not.toBe(firstThreadId);
+    expect(afterLastDelete.currentThreadId).toBe(afterLastDelete.threads[0].id);
+
+    const restored = new ThreadStore(path);
+    await restored.initialize();
+    expect(restored.snapshot().threads).toHaveLength(1);
+    expect(restored.snapshot().currentThreadId).toBe(restored.snapshot().threads[0].id);
+  });
 });

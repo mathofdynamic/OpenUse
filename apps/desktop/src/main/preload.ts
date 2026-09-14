@@ -22,6 +22,7 @@ const api = {
   startTask: (command: string, threadId: string): Promise<void> => ipcRenderer.invoke("openuse:start-task", { command, threadId }),
   createThread: (): Promise<AppSnapshot> => ipcRenderer.invoke("openuse:create-thread"),
   selectThread: (threadId: string): Promise<AppSnapshot> => ipcRenderer.invoke("openuse:select-thread", { threadId }),
+  deleteThread: (threadId: string): Promise<AppSnapshot> => ipcRenderer.invoke("openuse:delete-thread", { threadId }),
   createThreadFolder: (name: string): Promise<AppSnapshot> => ipcRenderer.invoke("openuse:create-thread-folder", { name }),
   moveThread: (threadId: string, folderId?: string): Promise<AppSnapshot> => ipcRenderer.invoke("openuse:move-thread", { threadId, folderId }),
   stopTask: (): Promise<void> => ipcRenderer.invoke("openuse:stop-task"),
