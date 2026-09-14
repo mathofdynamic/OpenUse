@@ -111,6 +111,16 @@ const browserPreviewBridge: Window["openuse"] = {
     };
     return browserPreviewSnapshot;
   },
+  setNamedProviderModel: async (provider, modelId) => {
+    browserPreviewSnapshot = {
+      ...browserPreviewSnapshot,
+      settings: {
+        ...browserPreviewSnapshot.settings,
+        namedProviders: { ...browserPreviewSnapshot.settings.namedProviders, [provider]: { ...browserPreviewSnapshot.settings.namedProviders[provider], modelId } },
+      },
+    };
+    return browserPreviewSnapshot;
+  },
   refreshNamedProvider: async () => browserPreviewSnapshot,
   setLocale: async (nextLocale) => {
     browserPreviewSnapshot = { ...browserPreviewSnapshot, settings: { ...browserPreviewSnapshot.settings, locale: nextLocale } };
@@ -197,6 +207,7 @@ export function App() {
   const [folderFilter, setFolderFilter] = useState("all");
   const [folderFormOpen, setFolderFormOpen] = useState(false);
   const [folderNameDraft, setFolderNameDraft] = useState("");
+  const [modelSelectionPending, setModelSelectionPending] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState<string | undefined>();
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const appearanceRevision = useRef(0);
@@ -343,6 +354,44 @@ export function App() {
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Subscription provider settings could not be saved."); }
   }
 
+  async function selectTopbarModel(modelId: string) {
+    const provider = settings.provider;
+    const previousGatewayModel = settings.modelId;
+    const previousNamedModel = isNamedProvider(provider) ? settings.namedProviders[provider].modelId : undefined;
+    setModelSelectionPending(true);
+    if (provider === "vercel-gateway") {
+      setSettings((current) => ({ ...current, modelId }));
+    } else if (isNamedProvider(provider)) {
+      setSettings((current) => ({
+        ...current,
+        namedProviders: { ...current.namedProviders, [provider]: { ...current.namedProviders[provider], modelId } },
+      }));
+    }
+    try {
+      const snapshot = provider === "vercel-gateway"
+        ? await runtimeApi.setModel(modelId)
+        : isNamedProvider(provider)
+          ? await runtimeApi.setNamedProviderModel(provider, modelId)
+          : undefined;
+      if (snapshot) {
+        applySnapshot(snapshot);
+        setError(undefined);
+      }
+    } catch (caught) {
+      if (provider === "vercel-gateway") {
+        setSettings((current) => ({ ...current, modelId: previousGatewayModel }));
+      } else if (isNamedProvider(provider) && previousNamedModel !== undefined) {
+        setSettings((current) => ({
+          ...current,
+          namedProviders: { ...current.namedProviders, [provider]: { ...current.namedProviders[provider], modelId: previousNamedModel } },
+        }));
+      }
+      setError(caught instanceof Error ? caught.message : "The selected model could not be saved.");
+    } finally {
+      setModelSelectionPending(false);
+    }
+  }
+
   async function testConnection(modelId: string) {
     setConnectionTest("testing");
     try {
@@ -455,7 +504,7 @@ export function App() {
       <main className="main-column">
         <header className="topbar app-header" aria-label={t("OpenUse header")}>
           <div className="topbar-actions">
-            {settings.provider === "vercel-gateway" ? <ModelPicker models={models} value={settings.modelId} onSelect={(modelId) => void runtimeApi.setModel(modelId).then(applySnapshot)} compact disabled={isRunning} /> : activeNamedProvider ? <NamedModelPicker models={activeNamedStatus?.models ?? []} value={effectiveNamedModelId} onSelect={(modelId) => void runtimeApi.setNamedProvider(activeNamedProvider, { modelId }).then(applySnapshot)} compact disabled={isRunning} /> : <div className="topbar-provider-model"><strong>{activeModel.label}</strong><small>{providerLabel(locale, settings.provider)}</small></div>}
+            {settings.provider === "vercel-gateway" ? <ModelPicker models={models} value={settings.modelId} onSelect={(modelId) => void selectTopbarModel(modelId)} compact disabled={isRunning || modelSelectionPending} /> : activeNamedProvider ? <NamedModelPicker models={activeNamedStatus?.models ?? []} value={effectiveNamedModelId} onSelect={(modelId) => void selectTopbarModel(modelId)} compact disabled={isRunning || modelSelectionPending} /> : <div className="topbar-provider-model"><strong>{activeModel.label}</strong><small>{providerLabel(locale, settings.provider)}</small></div>}
             <div className="topbar-reasoning"><span>{t("Reasoning")}</span><ReasoningSelect model={activeModel} value={effectiveReasoning} onChange={updateReasoning} compact disabled={isRunning} /></div>
             {activeNamedProvider && <ProviderQuotaMeter status={activeNamedStatus} onRefresh={() => void runtimeApi.refreshNamedProvider(activeNamedProvider).then(applySnapshot)} />}
             <SpendPill taskCost={taskCost} total={usage.totalKnownSpend} />

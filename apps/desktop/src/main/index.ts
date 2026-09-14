@@ -52,6 +52,10 @@ const namedProviderSchema = z.object({
   executablePath: z.string().trim().max(500).optional(),
   modelId: z.string().trim().max(240).optional(),
 });
+const namedProviderModelSchema = z.object({
+  provider: z.enum(["codex", "claude", "opencode"]),
+  modelId: z.string().trim().min(1).max(240),
+});
 const localeSchema = z.object({ locale: z.enum(["en", "fa"]) });
 const reasoningSchema = z.object({ reasoningEffort: z.enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"]) });
 const appearanceSchema = z.object({
@@ -189,6 +193,12 @@ function installIpc(): void {
     await settings.setNamedProvider(input.provider as NamedProviderId, { executablePath: input.executablePath, modelId: input.modelId });
     await settings.setProvider(input.provider as NamedProviderId);
     await namedProviders.refresh(input.provider as NamedProviderId);
+    return publicSnapshot();
+  });
+  ipcMain.handle("openuse:set-named-provider-model", async (event, raw: unknown) => {
+    assertSender(event);
+    const input = namedProviderModelSchema.parse(raw);
+    await settings.setNamedProvider(input.provider as NamedProviderId, { modelId: input.modelId });
     return publicSnapshot();
   });
   ipcMain.handle("openuse:refresh-named-provider", async (event, raw: unknown) => {
