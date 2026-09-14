@@ -595,7 +595,7 @@ function ThreadPanel({ variant, snapshot, selectedFolder, folderFormOpen, folder
       const latest = thread.tasks.at(-1);
       return <div className={`thread-row ${thread.id === snapshot.currentThreadId ? "thread-row-selected" : ""}`} key={thread.id}>
         <button className="thread-row-main" type="button" onClick={() => onSelectThread(thread.id)}><strong>{thread.title}</strong><small>{latest ? variant === "rail" ? `${latest.actions} ${t("actions")} · ${latest.steps} ${t("steps")}` : `${statusLabel(locale, latest.status)} · ${latest.actions} ${t("actions")} · ${latest.steps} ${t("steps")}` : t("No tasks yet")}</small></button>
-        <ThemedSelect className="thread-folder-select" value={thread.folderId ?? "none"} options={folderOptions} ariaLabel={`${t("Move thread")} ${thread.title}`} onChange={(value) => onMoveThread(thread.id, value)} />
+        <ThemedSelect className="thread-folder-select" compact value={thread.folderId ?? "none"} options={folderOptions} ariaLabel={`${t("Move thread")} ${thread.title}`} onChange={(value) => onMoveThread(thread.id, value)} />
       </div>;
     })}</div>
     <div className="thread-panel-footer"><span>{t("{count} threads", { count: snapshot.threads.length })}</span><button className="thread-panel-new-link" type="button" disabled={disabled} onClick={onNew}>{t("New thread")}</button></div>
@@ -861,10 +861,11 @@ interface ThemedSelectProps {
   ariaLabel: string;
   onChange(value: string): void;
   className?: string;
+  compact?: boolean;
   disabled?: boolean;
 }
 
-function ThemedSelect({ id, value, options, ariaLabel, onChange, className = "", disabled = false }: ThemedSelectProps) {
+function ThemedSelect({ id, value, options, ariaLabel, onChange, className = "", compact = false, disabled = false }: ThemedSelectProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -975,8 +976,9 @@ function ThemedSelect({ id, value, options, ariaLabel, onChange, className = "",
   };
 
   return <div ref={rootRef} className={`select-wrap themed-select ${className}`.trim()}>
-    <button ref={triggerRef} id={id} className="themed-select-trigger" type="button" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId} disabled={disabled} onClick={() => open ? closeMenu() : openMenu()} onKeyDown={onTriggerKeyDown}>
-      <span>{selected?.label ?? value}</span>
+    <button ref={triggerRef} id={id} className={`themed-select-trigger ${compact ? "themed-select-trigger-compact" : ""}`.trim()} type="button" aria-label={ariaLabel} title={compact ? selected?.label ?? value : undefined} aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId} disabled={disabled} onClick={() => open ? closeMenu() : openMenu()} onKeyDown={onTriggerKeyDown}>
+      {compact && <Glyph name="folder" />}
+      {!compact && <span>{selected?.label ?? value}</span>}
       <Glyph name="chevron" />
     </button>
     {open && <div ref={menuRef} id={menuId} className="themed-select-menu" role="listbox" tabIndex={-1} aria-label={ariaLabel} aria-activedescendant={`${menuId}-option-${activeIndex}`} onKeyDown={onMenuKeyDown}>
@@ -1009,5 +1011,5 @@ function formatModelPrice(direct: number | undefined, tiers: Array<{ perToken: n
 function primaryForeground(hex: string): string { const value = hex.replace("#", ""); if (value.length !== 6) return "#0a0a0a"; const channels = [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16) / 255).map((channel) => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4); const luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]; return luminance > 0.52 ? "#0a0a0a" : "#ffffff"; }
 type ConnectionTestState = "idle" | "testing" | GatewayConnectionResult;
 
-function Glyph({ name }: { name: GlyphName }) { const paths: Record<GlyphName, string> = { activity: "M3 12h4l2-7 4 14 2-7h6", sliders: "M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4", chevron: "m7 10 5 5 5-5", arrow: "M4 12h15m-6-6 6 6-6 6", plus: "M12 5v14M5 12h14", spark: "m12 3 1.5 6.5L20 12l-6.5 1.5L12 20l-1.5-6.5L4 12l6.5-2.5L12 3Z", tool: "M14.5 6.5a4 4 0 0 0-5.2 5.2L4 17l3 3 5.3-5.3a4 4 0 0 0 5.2-5.2l-2.4 2.4-2.4-2.4 1.8-2.9Z", desktop: "M4 5h16v11H4zM9 20h6M12 16v4", shield: "M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6l8-3Z", check: "m5 12 4 4L19 6", alert: "M12 4 21 20H3L12 4Zm0 6v4m0 3h.01", lock: "M6 10h12v10H6zM8 10V7a4 4 0 0 1 8 0v3", chart: "M4 19V5m0 14h16M8 16v-5m4 5V7m4 9v-8", minus: "M5 12h14", square: "M5 5h14v14H5z", restore: "M7 7h10v10H7zM7 10H5v9h9v-2", close: "M6 6l12 12M18 6 6 18" }; return <svg className="glyph" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name]} /></svg>; }
-type GlyphName = "activity" | "sliders" | "chevron" | "arrow" | "plus" | "spark" | "tool" | "desktop" | "shield" | "check" | "alert" | "lock" | "chart" | "minus" | "square" | "restore" | "close";
+function Glyph({ name }: { name: GlyphName }) { const paths: Record<GlyphName, string> = { activity: "M3 12h4l2-7 4 14 2-7h6", sliders: "M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4", chevron: "m7 10 5 5 5-5", arrow: "M4 12h15m-6-6 6 6-6 6", plus: "M12 5v14M5 12h14", spark: "m12 3 1.5 6.5L20 12l-6.5 1.5L12 20l-1.5-6.5L4 12l6.5-2.5L12 3Z", tool: "M14.5 6.5a4 4 0 0 0-5.2 5.2L4 17l3 3 5.3-5.3a4 4 0 0 0 5.2-5.2l-2.4 2.4-2.4-2.4 1.8-2.9Z", folder: "M3 6.5h6l2 2H21v9H3z", desktop: "M4 5h16v11H4zM9 20h6M12 16v4", shield: "M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6l8-3Z", check: "m5 12 4 4L19 6", alert: "M12 4 21 20H3L12 4Zm0 6v4m0 3h.01", lock: "M6 10h12v10H6zM8 10V7a4 4 0 0 1 8 0v3", chart: "M4 19V5m0 14h16M8 16v-5m4 5V7m4 9v-8", minus: "M5 12h14", square: "M5 5h14v14H5z", restore: "M7 7h10v10H7zM7 10H5v9h9v-2", close: "M6 6l12 12M18 6 6 18" }; return <svg className="glyph" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name]} /></svg>; }
+type GlyphName = "activity" | "sliders" | "chevron" | "arrow" | "plus" | "spark" | "tool" | "folder" | "desktop" | "shield" | "check" | "alert" | "lock" | "chart" | "minus" | "square" | "restore" | "close";
