@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { nativeResponseSchema, type NativeMethod, type NativeMethodParams, type NativeMethodResult } from "@openuse/protocol";
 import { OpenUseError, nowIso, type EngineStatus } from "@openuse/shared";
 import type { ComputerRpc } from "@openuse/computer";
@@ -17,12 +17,17 @@ export function resolveNativeEnginePath(options: NativeProcessOptions, configure
   const developmentOverride = configuredPath ?? (!options.isPackaged ? process.env.OPENUSE_NATIVE_ENGINE_PATH : undefined);
   if (developmentOverride) return developmentOverride;
   if (options.platform === "darwin") {
-    if (!options.isPackaged) return join(options.appPath, "..", "..", "native", "macos", ".build", "release", "OpenUseMacController");
-    return join(options.resourcesPath, "..", "MacOS", "OpenUseMacController");
+    const path = posix;
+    if (!options.isPackaged) return path.join(options.appPath, "..", "..", "native", "macos", ".build", "release", "OpenUseMacController");
+    return path.join(options.resourcesPath, "..", "MacOS", "OpenUseMacController");
   }
   if (options.platform === "win32") {
-    if (!options.isPackaged) return join(options.appPath, "..", "..", "native", "windows", "publish", "OpenUse.WindowsController.exe");
-    return join(options.resourcesPath, "native", "windows", "OpenUse.WindowsController.exe");
+    // Tests and diagnostics may pass POSIX-style fixture paths even when the
+    // host process is Windows. Preserve that representation while using
+    // native Windows joining for real drive/UNC paths.
+    const path = /^(?:[A-Za-z]:[\\/]|\\\\)/.test(options.appPath) ? win32 : posix;
+    if (!options.isPackaged) return path.join(options.appPath, "..", "..", "native", "windows", "publish", "OpenUse.WindowsController.exe");
+    return path.join(options.resourcesPath, "native", "windows", "OpenUse.WindowsController.exe");
   }
   return undefined;
 }
@@ -197,7 +202,8 @@ export class NativeEngineProcess implements ComputerRpc {
     }
     this.hasAttemptedStart = true;
     this.processState = "starting";
-    const child = spawn(enginePath, [], {
+    const launch = resolveLaunchCommand(enginePath);
+    const child = spawn(launch.command, launch.args, {
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -324,6 +330,20 @@ export class NativeEngineProcess implements ComputerRpc {
   private platformLabel(): string {
     return this.options.platform === "darwin" ? "macOS" : "Windows";
   }
+}
+
+function resolveLaunchCommand(enginePath: string): { command: string; args: string[] } {
+  if (process.platform !== "win32" || !enginePath.toLowerCase().endsWith(".sh")) {
+    return { command: enginePath, args: [] };
+  }
+  // Test and development fixtures sometimes use a POSIX script on Windows.
+  // Installed OpenUse always launches the published .NET executable directly.
+  const gitShellCandidates = [
+    process.env.ProgramW6432 ? join(process.env.ProgramW6432, "Git", "usr", "bin", "sh.exe") : undefined,
+    process.env.ProgramFiles ? join(process.env.ProgramFiles, "Git", "usr", "bin", "sh.exe") : undefined,
+  ].filter((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
+  const shell = gitShellCandidates[0] ?? "sh.exe";
+  return { command: shell, args: [enginePath.replaceAll("\\", "/")] };
 }
 
 function isKnownErrorCode(value: string): value is OpenUseError["code"] {

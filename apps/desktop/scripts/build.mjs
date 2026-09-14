@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { build as buildRenderer } from "vite";
 
 const here = dirname(fileURLToPath(import.meta.url));
-execFileSync(process.platform === "win32" ? "pnpm.cmd" : "pnpm", ["exec", "node", `${here}/build-main.mjs`], { stdio: "inherit" });
-execFileSync(process.platform === "win32" ? "pnpm.cmd" : "pnpm", ["exec", "vite", "build"], { stdio: "inherit" });
+execFileSync(process.execPath, [join(here, "build-main.mjs")], { stdio: "inherit" });
+await buildRenderer({ configFile: join(here, "..", "vite.config.ts") });

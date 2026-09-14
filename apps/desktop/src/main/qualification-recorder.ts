@@ -102,7 +102,9 @@ function redactEvent(event: RuntimeEvent): unknown {
     case "permission.resolved":
       return { type: event.type, taskId: event.taskId, requestId: event.requestId, decision: event.decision, at: event.at };
     case "model.usage":
-      return { type: event.type, taskId: event.taskId, step: event.step, modelId: event.modelId, inputTokens: event.inputTokens, outputTokens: event.outputTokens, totalTokens: event.totalTokens, at: event.at };
+      return { type: event.type, taskId: event.taskId, step: event.step, modelId: event.modelId, provider: event.provider, reasoningEffort: event.reasoningEffort, inputTokens: event.inputTokens, outputTokens: event.outputTokens, totalTokens: event.totalTokens, actualCost: event.actualCost, costSource: event.costSource, at: event.at };
+    case "cursor":
+      return { type: event.type, taskId: event.taskId, interaction: event.interaction, target: event.target ? { point: event.target.point, bounds: event.target.bounds, display: event.target.display, coordinateSystem: event.target.coordinateSystem } : undefined, at: event.at };
     case "action.completed":
       return { type: event.type, taskId: event.taskId, actionId: event.actionId, durationMs: event.durationMs, telemetry: event.telemetry, at: event.at };
     case "action.failed":

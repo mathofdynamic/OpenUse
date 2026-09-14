@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MODEL_ID, DEFAULT_REASONING_EFFORT, GatewayModelProvider, classifyGatewayConnectionError, getModelCapabilities, getModelDefinition, testGatewayConnection } from "./index";
+import { DEFAULT_MODEL_ID, DEFAULT_REASONING_EFFORT, GatewayModelProvider, calculateModelCost, classifyGatewayConnectionError, customModelDefinition, estimateTwentyStepCost, extractGatewayCost, getCompatibilityIssues, getModelCapabilities, getModelDefinition, parseGatewayCatalog, resolveReasoningEffort, testGatewayConnection } from "./index";
 
 describe("model capability registry", () => {
   it("marks the initial catalog as Computer Use compatible", () => {
@@ -104,6 +104,62 @@ describe("model capability registry", () => {
       ok: false,
       code: "INVALID_API_KEY",
       message: "AI Gateway authentication failed (HTTP 401). Use a Vercel AI Gateway key from the AI Gateway API Keys page; OpenAI or Anthropic provider keys are not interchangeable.",
+    });
+  });
+
+  it("parses dynamic Gateway metadata, capabilities, direct pricing, and tiers", () => {
+    const models = parseGatewayCatalog({ data: [
+      {
+        id: "provider/agent-model",
+        name: "Agent Model",
+        owned_by: "provider",
+        type: "language",
+        context_window: 128000,
+        tags: ["tool-use", "reasoning"],
+        modalities: { input: ["text", "image"], output: ["text"] },
+        supported_parameters: ["tools", "reasoning"],
+        reasoning_options: [{ type: "toggle" }],
+        pricing: { input: "0.000001", output: "0.000002" },
+      },
+      {
+        id: "provider/image-model",
+        type: "image",
+        pricing: { input: "0.000001", output: "0.000002" },
+      },
+      {
+        id: "provider/tiered",
+        type: "language",
+        tags: ["tool-use"],
+        modalities: { input: ["image"], output: ["text"] },
+        pricing: { input_tiers: [{ min: 0, max: 1000, cost: "0.000001" }, { min: 1000, cost: "0.000002" }], output: "0.000003" },
+      },
+    ] });
+    expect(models).toHaveLength(2);
+    expect(models[0]).toMatchObject({ id: "provider/agent-model", contextWindow: 128000, capabilities: { toolCalling: true, vision: true, reasoning: true, reasoningEfforts: ["provider-default", "none"] }, pricing: { inputPerToken: 0.000001, outputPerToken: 0.000002 } });
+    expect(models[1].pricing?.inputTiers).toHaveLength(2);
+    expect(getCompatibilityIssues(models[1])).toEqual([]);
+    expect(calculateModelCost(models[1].pricing, 1500, 1000)).toBeCloseTo(0.005, 12);
+  });
+
+  it("falls unsupported reasoning back to provider default and estimates twenty steps", () => {
+    const model = parseGatewayCatalog({ data: [{ id: "provider/model", tags: ["tool-use", "reasoning"], modalities: { input: ["image"], output: ["text"] }, reasoning_options: [{ type: "toggle" }], pricing: { input: "0.000001", output: "0.000002" } }] })[0];
+    expect(resolveReasoningEffort(model, "high")).toBe("provider-default");
+    expect(resolveReasoningEffort(model, "none")).toBe("none");
+    expect(estimateTwentyStepCost(model, { inputTokensPerStep: 1_000, outputTokensPerStep: 500, source: "general" })).toBeCloseTo(0.04, 12);
+  });
+
+  it("validates Gateway-reported request cost metadata", () => {
+    expect(extractGatewayCost({ gateway: { cost: "0.0021" } })).toBe(0.0021);
+    expect(extractGatewayCost({ gateway: { cost: -1 } })).toBeUndefined();
+    expect(extractGatewayCost({ gateway: { cost: "not-a-number" } })).toBeUndefined();
+  });
+
+  it("keeps custom OpenAI-compatible configuration explicit", () => {
+    expect(customModelDefinition({ baseUrl: "http://localhost:11434/v1", modelId: "llama3.2-vision", capabilities: { toolCalling: true, vision: true, reasoning: false } })).toMatchObject({
+      provider: "custom-openai-compatible",
+      sourceProvider: "Custom OpenAI-compatible endpoint",
+      id: "llama3.2-vision",
+      capabilities: { toolCalling: true, vision: true, reasoning: false },
     });
   });
 });

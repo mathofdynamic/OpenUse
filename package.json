@@ -1,6 +1,6 @@
 {
   "name": "openuse",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "A local-first, AI-agnostic Computer Use runtime for macOS and Windows.",
   "packageManager": "pnpm@10.14.0",
@@ -30,6 +30,7 @@
     "qualify:macos": "node scripts/qualify-macos.mjs",
     "package:macos": "node scripts/dist-macos.mjs",
     "dist:macos": "node scripts/dist-macos.mjs",
+    "dist:windows": "node scripts/dist-windows.mjs",
     "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {

@@ -8,7 +8,7 @@ import {
 } from "./index";
 
 describe("application permissions", () => {
-  it("seeds the MVP defaults", () => {
+  it("seeds the default permissions", () => {
     const records = defaultPermissionRecords();
     expect(records.find((record) => record.appName === "Notepad")?.level).toBe("ALLOW");
     expect(records.find((record) => record.appName === "Password Manager")?.level).toBe("DENY");

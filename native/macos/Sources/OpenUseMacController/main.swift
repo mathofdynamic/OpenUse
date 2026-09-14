@@ -351,7 +351,9 @@ private final class MacComputerController {
         }
         try token.throwIfCancelled()
         postMouse(at: CGPoint(x: x, y: y), button: button, count: 1)
-        return ["ok": true, "changed": true, "detail": "Clicked \(button) mouse button.", "interactionMethod": "coordinate-input"]
+        var result: [String: Any] = ["ok": true, "changed": true, "detail": "Clicked \(button) mouse button.", "interactionMethod": "coordinate-input"]
+        result.merge(targetMetadata(at: CGPoint(x: x, y: y))) { _, new in new }
+        return result
     }
 
     private func doubleClick(_ params: [String: Any], token: CancellationToken) throws -> [String: Any] {
@@ -359,7 +361,9 @@ private final class MacComputerController {
         let y = try boundedCoordinate(params, "y")
         try token.throwIfCancelled()
         postMouse(at: CGPoint(x: x, y: y), button: "left", count: 2)
-        return ["ok": true, "changed": true, "detail": "Double-clicked the requested position.", "interactionMethod": "coordinate-input"]
+        var result: [String: Any] = ["ok": true, "changed": true, "detail": "Double-clicked the requested position.", "interactionMethod": "coordinate-input"]
+        result.merge(targetMetadata(at: CGPoint(x: x, y: y))) { _, new in new }
+        return result
     }
 
     private func clickElement(_ params: [String: Any], token: CancellationToken) throws -> [String: Any] {
@@ -379,14 +383,18 @@ private final class MacComputerController {
             if actions.contains(action as String) {
                 let result = AXUIElementPerformAction(selected.element, action as CFString)
                 if result == .success {
-                    return ["ok": true, "changed": true, "detail": "Activated \(selected.label).", "interactionMethod": "accessibility-native", "targetElementId": selected.id, "window": window]
+                    var response: [String: Any] = ["ok": true, "changed": true, "detail": "Activated \(selected.label).", "interactionMethod": "accessibility-native", "targetElementId": selected.id, "window": window]
+                    response.merge(targetMetadata(at: CGPoint(x: bounds.midX, y: bounds.midY), bounds: bounds)) { _, new in new }
+                    return response
                 }
             }
         }
         try focusElement(selected.element)
         try token.throwIfCancelled()
         postMouse(at: CGPoint(x: bounds.midX, y: bounds.midY), button: "left", count: 1)
-        return ["ok": true, "changed": true, "detail": "Clicked \(selected.label) by its bounds.", "interactionMethod": "element-coordinate", "targetElementId": selected.id, "window": window]
+        var result: [String: Any] = ["ok": true, "changed": true, "detail": "Clicked \(selected.label) by its bounds.", "interactionMethod": "element-coordinate", "targetElementId": selected.id, "window": window]
+        result.merge(targetMetadata(at: CGPoint(x: bounds.midX, y: bounds.midY), bounds: bounds)) { _, new in new }
+        return result
     }
 
     private func typeText(_ params: [String: Any], token: CancellationToken) throws -> [String: Any] {
@@ -403,12 +411,19 @@ private final class MacComputerController {
         if let target, !isSecureRole(stringAttribute(target.element, kAXRoleAttribute as CFString) ?? ""), canSetValue(target.element) {
             let result = AXUIElementSetAttributeValue(target.element, kAXValueAttribute as CFString, text as CFString)
             if result == .success {
-                return ["ok": true, "changed": true, "detail": "Set \(text.count) characters through macOS Accessibility.", "interactionMethod": "accessibility-native", "targetElementId": target.id]
+                var response: [String: Any] = ["ok": true, "changed": true, "detail": "Set \(text.count) characters through macOS Accessibility.", "interactionMethod": "accessibility-native", "targetElementId": target.id]
+                let bounds = elementBounds(target.element)
+                response.merge(targetMetadata(at: CGPoint(x: bounds.midX, y: bounds.midY), bounds: bounds)) { _, new in new }
+                return response
             }
         }
         try sendUnicodeText(text, token: token)
         var result: [String: Any] = ["ok": true, "changed": true, "detail": "Typed \(text.count) characters.", "interactionMethod": "keyboard-input"]
-        if let target { result["targetElementId"] = target.id }
+        if let target {
+            result["targetElementId"] = target.id
+            let bounds = elementBounds(target.element)
+            result.merge(targetMetadata(at: CGPoint(x: bounds.midX, y: bounds.midY), bounds: bounds)) { _, new in new }
+        }
         return result
     }
 
@@ -426,7 +441,11 @@ private final class MacComputerController {
         try token.throwIfCancelled()
         let event = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: Int32(-amount), wheel2: 0, wheel3: 0)
         event?.post(tap: .cghidEventTap)
-        return ["ok": true, "changed": true, "detail": "Scrolled the focused application.", "interactionMethod": "coordinate-input"]
+        var result: [String: Any] = ["ok": true, "changed": true, "detail": "Scrolled the focused application.", "interactionMethod": "coordinate-input"]
+        if let x = params["x"] as? Int, let y = params["y"] as? Int {
+            result.merge(targetMetadata(at: CGPoint(x: x, y: y))) { _, new in new }
+        }
+        return result
     }
 
     private func selfTest() -> [String: Any] {
@@ -774,6 +793,22 @@ private func bounds(_ value: Any?) -> CGRect? {
 
 private func boundsDictionary(_ rectangle: CGRect) -> [String: Any] {
     ["x": Int(rectangle.origin.x.rounded()), "y": Int(rectangle.origin.y.rounded()), "width": Int(rectangle.width.rounded()), "height": Int(rectangle.height.rounded())]
+}
+
+private func targetMetadata(at point: CGPoint, bounds: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)) -> [String: Any] {
+    var result: [String: Any] = [
+        "targetPoint": ["x": Int(point.x.rounded()), "y": Int(point.y.rounded())],
+        "targetBounds": boundsDictionary(bounds),
+        "coordinateSystem": "global-screen-points",
+    ]
+    if let display = monitorDiagnostics().first(where: {
+        guard let raw = $0["bounds"] as? [String: Any] else { return false }
+        let rectangle = CGRect(x: raw["x"] as? Int ?? 0, y: raw["y"] as? Int ?? 0, width: raw["width"] as? Int ?? 0, height: raw["height"] as? Int ?? 0)
+        return rectangle.contains(point)
+    }) {
+        result["display"] = display
+    }
+    return result
 }
 
 private func windowInfo(id: String, title: String, app: String, appIdentity: String, processName: String, processId: Int, className: String, bounds: CGRect, focused: Bool) -> [String: Any] {

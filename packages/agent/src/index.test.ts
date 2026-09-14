@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
+import type { ModelMessage } from "ai";
 import { MockComputerController } from "@openuse/computer";
 import { InMemoryPermissionStore, PermissionEngine } from "@openuse/permissions";
 import type { ModelProvider, AgentStepOptions, AgentStepResult } from "@openuse/ai";
 import type { ModelCapabilities } from "@openuse/shared";
-import { ComputerUseAgent } from "./index";
+import { ComputerUseAgent, agentContextCharLimit, compactAgentMessages } from "./index";
 
 function assistantTool(toolName: string, toolCallId: string, input: unknown): AgentStepResult {
   return {
@@ -89,6 +90,7 @@ describe("ComputerUseAgent", () => {
     expect(events.some((event) => (event as { type?: string }).type === "action.completed")).toBe(true);
     const completed = events.find((event) => (event as { type?: string }).type === "action.completed" && (event as { actionId?: string }).actionId?.endsWith("-action-4")) as { telemetry?: { interactionMethod?: string; retryCount?: number } } | undefined;
     expect(completed?.telemetry).toMatchObject({ interactionMethod: "accessibility-native", retryCount: 0 });
+    expect(events.filter((event) => (event as { type?: string }).type === "cursor").length).toBeGreaterThanOrEqual(2);
   });
 
   it("stops before a provider step when cancelled", async () => {
@@ -165,5 +167,23 @@ describe("ComputerUseAgent", () => {
     expect(result).toMatchObject({ status: "completed", actionCount: 2 });
     expect(provider.calls[1]?.messages.some((message) => message.role === "user" && typeof message.content === "string" && message.content.includes("computer_inspect_window"))).toBe(true);
     expect(computer.state.actions.map((action) => action.method)).toEqual(["listWindows"]);
+  });
+
+  it("compacts a long model transcript while preserving the task and recent turn", () => {
+    const messages: ModelMessage[] = [{ role: "user", content: "Open Notepad and continue the task." }];
+    for (let index = 0; index < 12; index += 1) {
+      messages.push({ role: "assistant", content: [{ type: "text", text: `assistant-${index}-${"x".repeat(80)}` }] });
+      messages.push({ role: "tool", content: [{ type: "tool-result", toolCallId: `call-${index}`, toolName: "computer_inspect_window", output: { observation: "x".repeat(120) } }] as never });
+    }
+    const compacted = compactAgentMessages(messages, 1_000);
+    expect(JSON.stringify(compacted).length).toBeLessThanOrEqual(1_000);
+    expect(compacted[0]).toMatchObject({ role: "user", content: "Open Notepad and continue the task." });
+    expect(compacted.some((message) => message.role === "user" && typeof message.content === "string" && message.content.includes("compacted"))).toBe(true);
+  });
+
+  it("uses a conservative budget for smaller model context windows", () => {
+    expect(agentContextCharLimit()).toBe(120_000);
+    expect(agentContextCharLimit(16_000)).toBeLessThan(120_000);
+    expect(agentContextCharLimit(128_000)).toBe(120_000);
   });
 });

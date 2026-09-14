@@ -4,6 +4,7 @@ out/
 release/
 coverage/
 *.tsbuildinfo
+*.stackdump
 .env
 .env.*
 !.env.example

@@ -129,7 +129,7 @@ export class PermissionEngine {
     const mustAskForRisk = input.risk === "sensitive" || input.risk === "destructive";
 
     if (CREDENTIAL_APP_WORDS.test(appName)) {
-      throw new OpenUseError("APP_NOT_ALLOWED", `${appName} is blocked in this MVP.`);
+      throw new OpenUseError("APP_NOT_ALLOWED", `${appName} is blocked by OpenUse permissions.`);
     }
 
     if (!mustAskForRisk && existing === "DENY") {

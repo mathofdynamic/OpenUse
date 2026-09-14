@@ -20,11 +20,14 @@ import {
   redactText,
   type ActionRisk,
   type ActionTelemetry,
+  type CursorInteraction,
+  type CursorTarget,
   type InteractionMethod,
   type QualificationDebugSnapshot,
   type QualificationElementSnapshot,
   type QualificationScreenshotSnapshot,
   type QualificationWindowSnapshot,
+  type ReasoningEffort,
   type RuntimeEvent,
 } from "@openuse/shared";
 import type { AgentStepResult, ModelProvider } from "@openuse/ai";
@@ -34,7 +37,7 @@ const appSchema = z.string().trim().min(1).max(160);
 const roleSchema = z.string().trim().min(1).max(80);
 const nameSchema = z.string().trim().min(1).max(240);
 
-const schemas = {
+export const computerToolSchemas = {
   computer_list_apps: z.object({}),
   computer_list_windows: z.object({}),
   computer_inspect_window: z.object({ windowId: windowIdSchema }),
@@ -84,67 +87,67 @@ const schemas = {
   computer_finish: z.object({ summary: z.string().trim().min(1).max(800) }),
 };
 
-export type ComputerToolName = keyof typeof schemas;
+export type ComputerToolName = keyof typeof computerToolSchemas;
 export type ComputerToolInput = {
-  [Name in ComputerToolName]: z.infer<(typeof schemas)[Name]>;
+  [Name in ComputerToolName]: z.infer<(typeof computerToolSchemas)[Name]>;
 };
 
 export const computerTools: ToolSet = {
   computer_list_apps: tool({
     description: "List the visible desktop applications. Use this before launching an uncertain app.",
-    inputSchema: schemas.computer_list_apps,
+    inputSchema: computerToolSchemas.computer_list_apps,
   }),
   computer_list_windows: tool({
     description: "List current top-level application windows with stable window IDs, titles, and app identities.",
-    inputSchema: schemas.computer_list_windows,
+    inputSchema: computerToolSchemas.computer_list_windows,
   }),
   computer_inspect_window: tool({
     description: "Inspect one window and return a small semantic accessibility tree. Prefer this before clicking.",
-    inputSchema: schemas.computer_inspect_window,
+    inputSchema: computerToolSchemas.computer_inspect_window,
   }),
   computer_capture_screen: tool({
     description: "Capture one reduced screenshot when semantic state is insufficient. Do not call continuously.",
-    inputSchema: schemas.computer_capture_screen,
+    inputSchema: computerToolSchemas.computer_capture_screen,
   }),
   computer_launch_app: tool({
     description: "Launch a named desktop application. The runtime applies its own app permission policy.",
-    inputSchema: schemas.computer_launch_app,
+    inputSchema: computerToolSchemas.computer_launch_app,
   }),
   computer_focus_window: tool({
     description: "Focus a window by the ID returned by listWindows.",
-    inputSchema: schemas.computer_focus_window,
+    inputSchema: computerToolSchemas.computer_focus_window,
   }),
   computer_click: tool({
     description: "Click screen coordinates only when semantic element interaction is unavailable.",
-    inputSchema: schemas.computer_click,
+    inputSchema: computerToolSchemas.computer_click,
   }),
   computer_click_element: tool({
     description: "Click a fresh semantic UI element by role/name/automation ID, using its native pattern first.",
-    inputSchema: schemas.computer_click_element,
+    inputSchema: computerToolSchemas.computer_click_element,
   }),
   computer_double_click: tool({
     description: "Double-click screen coordinates as a last-resort interaction.",
-    inputSchema: schemas.computer_double_click,
+    inputSchema: computerToolSchemas.computer_double_click,
   }),
   computer_type_text: tool({
     description: "Type text into the focused or target window. Never use this for passwords or credentials.",
-    inputSchema: schemas.computer_type_text,
+    inputSchema: computerToolSchemas.computer_type_text,
   }),
   computer_press_key: tool({
     description: "Press one named key or a safe chord such as CMD+S, CTRL+S, ENTER, TAB, or ESCAPE.",
-    inputSchema: schemas.computer_press_key,
+    inputSchema: computerToolSchemas.computer_press_key,
   }),
   computer_scroll: tool({
     description: "Scroll the focused application by a bounded amount.",
-    inputSchema: schemas.computer_scroll,
+    inputSchema: computerToolSchemas.computer_scroll,
   }),
   computer_wait: tool({
     description: "Wait briefly for a desktop UI transition to settle.",
-    inputSchema: schemas.computer_wait,
+    inputSchema: computerToolSchemas.computer_wait,
   }),
   computer_finish: tool({
     description: "Use this when the user task is complete and the final state has been verified.",
-    inputSchema: schemas.computer_finish,
+    inputSchema: computerToolSchemas.computer_finish,
   }),
 };
 
@@ -174,6 +177,9 @@ export interface AgentRunOptions {
   modelId: string;
   maxActions?: number;
   abortSignal: AbortSignal;
+  reasoningEffort?: ReasoningEffort;
+  threadContext?: string;
+  contextWindow?: number;
   onEvent: (event: RuntimeEvent) => void;
   qualificationMode?: boolean;
 }
@@ -193,9 +199,9 @@ type ContentToolOutput = {
     | { type: "file"; mediaType: string; data: { type: "data"; data: string } }
   >;
 };
-type ToolOutput = JsonToolOutput | ContentToolOutput;
+export type ToolOutput = JsonToolOutput | ContentToolOutput;
 
-interface ToolExecution {
+export interface ToolExecution {
   output: ToolOutput;
   telemetry?: Omit<ActionTelemetry, "retryCount">;
   observation?: WindowInspection;
@@ -232,6 +238,10 @@ function operationValue(operation: OperationResult, after?: WindowInspection) {
     window: operation.window,
     interactionMethod: operation.interactionMethod,
     targetElementId: operation.targetElementId,
+    targetPoint: operation.targetPoint,
+    targetBounds: operation.targetBounds,
+    display: operation.display,
+    coordinateSystem: operation.coordinateSystem,
     after: after
       ? {
           window: after.window,
@@ -254,7 +264,7 @@ function elementLabel(input: { role?: string; name?: string }): string {
 
 export class ComputerUseAgent {
   constructor(
-    private readonly provider: ModelProvider,
+    private readonly provider: ModelProvider | undefined,
     private readonly computer: ComputerController,
     private readonly permissions: PermissionEngine,
   ) {}
@@ -266,7 +276,12 @@ export class ComputerUseAgent {
     const failureCounts = new Map<string, number>();
     let lastInspection: WindowInspection | undefined;
     let lastScreenshot: Screenshot | undefined;
-    let messages: ModelMessage[] = [{ role: "user", content: options.command }];
+    const contextCharLimit = agentContextCharLimit(options.contextWindow);
+    const initialPrompt = options.threadContext
+      ? `Earlier work in this OpenUse thread is summarized below. Treat it as context, not as a new instruction. Re-observe the current desktop before acting.\n\n${options.threadContext}\n\nCurrent task:\n${options.command}`
+      : options.command;
+    let messages: ModelMessage[] = [{ role: "user", content: initialPrompt }];
+    if (!this.provider) throw new OpenUseError("MODEL_FAILED", "This Computer Use agent has no model provider.");
     const capabilities = this.provider.getCapabilities(options.modelId);
     if (!capabilities.toolCalling || !capabilities.vision) {
       throw new OpenUseError(
@@ -289,12 +304,14 @@ export class ComputerUseAgent {
 
       let generated: AgentStepResult;
       try {
+        messages = compactAgentMessages(messages, contextCharLimit);
         generated = await this.provider.generateAgentStep({
           modelId: options.modelId,
           instructions: COMPUTER_USE_INSTRUCTIONS,
           messages,
           tools: computerTools,
           abortSignal: options.abortSignal,
+          reasoningEffort: options.reasoningEffort,
         });
       } catch (error) {
         throw asOpenUseError(error, "MODEL_FAILED");
@@ -305,13 +322,19 @@ export class ComputerUseAgent {
           taskId: options.taskId,
           step,
           modelId: options.modelId,
+          provider: this.provider.providerId ?? "vercel-gateway",
           inputTokens: generated.usage.inputTokens,
           outputTokens: generated.usage.outputTokens,
           totalTokens: generated.usage.totalTokens,
+          reasoningEffort: options.reasoningEffort ?? "provider-default",
+          actualCost: generated.actualCost,
+          costSource: generated.costSource ?? (generated.actualCost === undefined ? "unknown" : "gateway"),
+          taskCost: generated.actualCost ?? 0,
+          lifetimeSpend: 0,
           at: nowIso(),
         });
       }
-      messages = [...messages, ...generated.responseMessages];
+      messages = compactAgentMessages([...messages, ...generated.responseMessages], contextCharLimit);
 
       if (generated.toolCalls.length === 0) {
         throw new OpenUseError(
@@ -332,7 +355,7 @@ export class ComputerUseAgent {
         actionCount += 1;
         const actionId = `${options.taskId}-action-${actionCount}`;
         const toolName = toolCall.toolName as ComputerToolName;
-        const inputResult = schemas[toolName]?.safeParse(toolCall.input);
+        const inputResult = computerToolSchemas[toolName]?.safeParse(toolCall.input);
         const rawInput = inputResult?.success ? inputResult.data : undefined;
         const failureKey = `${toolName}:${failureSignature(inputResult?.success ? inputResult.data : toolCall.input)}`;
         const retryCount = failureCounts.get(failureKey) ?? 0;
@@ -351,6 +374,16 @@ export class ComputerUseAgent {
           },
           at: nowIso(),
         });
+        const preActionCursorTarget = cursorTargetForAction(toolName, rawInput, lastInspection);
+        if (preActionCursorTarget) {
+          options.onEvent({
+            type: "cursor",
+            taskId: options.taskId,
+            interaction: cursorInteractionForTool(toolName),
+            target: preActionCursorTarget,
+            at: nowIso(),
+          });
+        }
         const actionStartedAt = Date.now();
         try {
           if (!inputResult?.success) {
@@ -372,6 +405,23 @@ export class ComputerUseAgent {
             ? { ...execution.telemetry, retryCount }
             : undefined;
           const detail = detailForTimeline(toolName, execution.output);
+          const cursorTarget = execution.telemetry?.targetPoint
+            ? {
+                point: execution.telemetry.targetPoint,
+                bounds: execution.telemetry.targetBounds,
+                display: execution.telemetry.display,
+                coordinateSystem: execution.telemetry.coordinateSystem ?? "unknown",
+              }
+            : undefined;
+          if (cursorTarget) {
+            options.onEvent({
+              type: "cursor",
+              taskId: options.taskId,
+              interaction: cursorInteractionForTool(toolName),
+              target: cursorTarget,
+              at: nowIso(),
+            });
+          }
           options.onEvent({
             type: "action.completed",
             taskId: options.taskId,
@@ -405,7 +455,7 @@ export class ComputerUseAgent {
                 : undefined,
             detail,
           });
-          messages.push(toolMessage(toolCall.toolCallId, toolName, execution.output));
+          messages = compactAgentMessages([...messages, toolMessage(toolCall.toolCallId, toolName, execution.output)], contextCharLimit);
           if (toolName === "computer_finish") {
             const summaryInput = inputResult.data as ComputerToolInput["computer_finish"];
             finished = { status: "completed", summary: summaryInput.summary, actionCount };
@@ -458,29 +508,29 @@ export class ComputerUseAgent {
           const recovery = ["STALE_UI_STATE", "ELEMENT_NOT_FOUND", "WINDOW_NOT_FOUND"].includes(openUseError.code)
             ? "Refresh the affected window with computer_inspect_window before retrying this action once. Do not reuse old coordinates or an old element ID."
             : undefined;
-          messages.push(toolMessage(toolCall.toolCallId, toolName, jsonOutput({
+          messages = compactAgentMessages([...messages, toolMessage(toolCall.toolCallId, toolName, jsonOutput({
             ok: false,
             error: { code: openUseError.code, message: openUseError.message },
             durationMs,
             recovery,
-          })));
+          }))], contextCharLimit);
           if (recovery) {
             const windowId = windowIdFromInput(toolCall.input);
-            messages.push({
+            messages = compactAgentMessages([...messages, {
               role: "user",
               content: windowId
                 ? `Runtime recovery directive for window ${windowId}: ${recovery}`
                 : `Runtime recovery directive: ${recovery}`,
-            });
+            }], contextCharLimit);
             for (const skippedToolCall of generated.toolCalls.slice(toolIndex + 1)) {
-              messages.push(toolMessage(skippedToolCall.toolCallId, skippedToolCall.toolName, jsonOutput({
+              messages = compactAgentMessages([...messages, toolMessage(skippedToolCall.toolCallId, skippedToolCall.toolName, jsonOutput({
                 ok: false,
                 skipped: true,
                 error: {
                   code: "STALE_UI_STATE",
                   message: "This action was not executed because the preceding action failed. Refresh the UI before retrying.",
                 },
-              })));
+              }))], contextCharLimit);
             }
           }
           break;
@@ -651,7 +701,7 @@ export class ComputerUseAgent {
       case "computer_type_text": {
         const typed = input as ComputerToolInput["computer_type_text"];
         if (isCredentialTarget(typed.role, [typed.name, typed.automationId, typed.className].filter(Boolean).join(" "))) {
-          throw new OpenUseError("CREDENTIAL_INTERACTION_DISABLED", "Credential and password entry is disabled in this MVP.");
+          throw new OpenUseError("CREDENTIAL_INTERACTION_DISABLED", "Credential and password entry is disabled in this runtime.");
         }
         const window = typed.windowId ? await this.appForWindow(typed.windowId, signal) : undefined;
         let selectedElement: WindowInspection["elements"][number] | undefined;
@@ -660,7 +710,7 @@ export class ComputerUseAgent {
           const inspection = await this.computer.inspectWindow(window.id, signal);
           selectedElement = findElement(inspection, typed);
           if (selectedElement && isCredentialTarget(selectedElement.role, [selectedElement.name, selectedElement.automationId, selectedElement.className].filter(Boolean).join(" "))) {
-            throw new OpenUseError("CREDENTIAL_INTERACTION_DISABLED", "Credential and password entry is disabled in this MVP.");
+            throw new OpenUseError("CREDENTIAL_INTERACTION_DISABLED", "Credential and password entry is disabled in this runtime.");
           }
         }
         const focused = window ? { appName: window.app, appIdentity: window.appIdentity } : await this.focusedApplication(signal);
@@ -708,6 +758,16 @@ export class ComputerUseAgent {
       }
     }
   }
+
+  /** Executes one validated OpenUse tool for a product-owned external provider bridge. */
+  public async executeComputerTool<N extends ComputerToolName>(
+    toolName: N,
+    input: ComputerToolInput[N],
+    options: AgentRunOptions,
+    lastScreenshot?: Screenshot,
+  ): Promise<ToolExecution> {
+    return this.executeTool(toolName, input, options, lastScreenshot);
+  }
 }
 
 function appMatches(actual: string, requested: string): boolean {
@@ -737,7 +797,45 @@ function findElement(inspection: WindowInspection, input: ElementSelector): Wind
 
 type ActionTarget = Pick<ActionTelemetry, "targetApp" | "targetWindowId" | "targetWindowTitle" | "targetElementId">;
 
-function targetTelemetry(toolName: ComputerToolName, input: unknown, inspection?: WindowInspection): ActionTarget {
+export function cursorTargetForAction(toolName: ComputerToolName, input: unknown, inspection?: WindowInspection): CursorTarget | undefined {
+  const record = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const coordinateSystem = "unknown";
+  if ((toolName === "computer_click" || toolName === "computer_double_click") && typeof record.x === "number" && typeof record.y === "number") {
+    return { point: { x: record.x, y: record.y }, coordinateSystem };
+  }
+  if (toolName === "computer_scroll" && typeof record.x === "number" && typeof record.y === "number") {
+    return { point: { x: record.x, y: record.y }, coordinateSystem };
+  }
+  if ((toolName === "computer_click_element" || toolName === "computer_type_text") && inspection) {
+    const windowId = typeof record.windowId === "string" ? record.windowId : undefined;
+    if (windowId && windowId !== inspection.window.id) return undefined;
+    const selected = findElement(inspection, record as ElementSelector);
+    if (!selected) return undefined;
+    return {
+      point: {
+        x: selected.bounds.x + selected.bounds.width / 2,
+        y: selected.bounds.y + selected.bounds.height / 2,
+      },
+      bounds: selected.bounds,
+      coordinateSystem,
+    };
+  }
+  if (toolName === "computer_focus_window" && inspection) {
+    const windowId = typeof record.windowId === "string" ? record.windowId : undefined;
+    if (windowId !== inspection.window.id) return undefined;
+    return {
+      point: {
+        x: inspection.window.bounds.x + inspection.window.bounds.width / 2,
+        y: inspection.window.bounds.y + inspection.window.bounds.height / 2,
+      },
+      bounds: inspection.window.bounds,
+      coordinateSystem,
+    };
+  }
+  return undefined;
+}
+
+export function targetTelemetry(toolName: ComputerToolName, input: unknown, inspection?: WindowInspection): ActionTarget {
   const record = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const windowId = typeof record.windowId === "string" ? record.windowId : undefined;
   const elementId = typeof record.elementId === "string" ? record.elementId : undefined;
@@ -770,7 +868,83 @@ function operationTelemetry(
     targetWindowId: targetWindow?.id ?? windowId,
     targetWindowTitle: targetWindow?.title,
     targetElementId: operation.targetElementId ?? fallbackElementId,
+    targetPoint: operation.targetPoint,
+    targetBounds: operation.targetBounds,
+    display: operation.display,
+    coordinateSystem: operation.coordinateSystem,
   };
+}
+
+export const AGENT_CONTEXT_CHAR_LIMIT = 120_000;
+
+export function agentContextCharLimit(contextWindow?: number): number {
+  if (contextWindow === undefined || !Number.isFinite(contextWindow) || contextWindow <= 0) return AGENT_CONTEXT_CHAR_LIMIT;
+  const conservativeCharacterBudget = Math.floor(contextWindow * 3.5 * 0.55);
+  return Math.max(8_000, Math.min(AGENT_CONTEXT_CHAR_LIMIT, conservativeCharacterBudget));
+}
+
+function serializedMessageLength(messages: readonly ModelMessage[]): number {
+  try {
+    return JSON.stringify(messages).length;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function compactToolMessage(message: ModelMessage): ModelMessage {
+  if (message.role !== "tool") return message;
+  const content = Array.isArray(message.content) ? message.content : [];
+  const compactedContent = content.map((part) => {
+    if (!part || typeof part !== "object") return part;
+    const record = part as Record<string, unknown>;
+    return "toolCallId" in record
+      ? { ...record, output: "[Earlier observation omitted during context compaction. Re-observe the current desktop.]" }
+      : part;
+  });
+  return { ...message, content: compactedContent as never } as ModelMessage;
+}
+
+/**
+ * Keeps the original task and a valid recent assistant/tool turn while
+ * bounding the in-memory transcript. Tool results can contain screenshots,
+ * so oversized observations are replaced with a re-observation instruction.
+ */
+export function compactAgentMessages(messages: ModelMessage[], maxChars = AGENT_CONTEXT_CHAR_LIMIT): ModelMessage[] {
+  if (serializedMessageLength(messages) <= maxChars) return messages;
+  const first = messages[0]?.role === "user"
+    ? messages[0]
+    : { role: "user", content: "Continue the current OpenUse task." } as ModelMessage;
+  const assistantIndexes = messages.map((message, index) => message.role === "assistant" ? index : -1).filter((index) => index > 0);
+  const keepFrom = assistantIndexes[Math.max(0, assistantIndexes.length - 6)] ?? Math.max(1, messages.length - 6);
+  const suffix = messages.slice(keepFrom).map(compactToolMessage);
+  const compacted: ModelMessage[] = [
+    first,
+    { role: "user", content: "OpenUse compacted earlier tool history. Treat omitted observations as stale and re-observe the current desktop before acting." },
+    ...suffix,
+  ];
+  if (serializedMessageLength(compacted) <= maxChars) return compacted;
+
+  const lastAssistantIndex = [...assistantIndexes].reverse()[0];
+  const minimalSuffix = lastAssistantIndex === undefined
+    ? suffix.slice(-2)
+    : messages.slice(lastAssistantIndex).map(compactToolMessage);
+  const minimal: ModelMessage[] = [
+    first,
+    { role: "user", content: "OpenUse compacted earlier tool history. Re-observe the current desktop before acting." },
+    ...minimalSuffix,
+  ];
+  return serializedMessageLength(minimal) <= maxChars ? minimal : [first, compacted[1]];
+}
+
+function cursorInteractionForTool(toolName: ComputerToolName): CursorInteraction {
+  switch (toolName) {
+    case "computer_double_click": return "double-click";
+    case "computer_click":
+    case "computer_click_element": return "click";
+    case "computer_type_text": return "typing";
+    case "computer_scroll": return "scroll";
+    default: return "move";
+  }
 }
 
 function screenshotDebug(screenshot: Screenshot): QualificationScreenshotSnapshot {
@@ -819,7 +993,7 @@ function windowIdFromInput(input: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function actionSummary(toolName: ComputerToolName, input: unknown): string {
+export function actionSummary(toolName: ComputerToolName, input: unknown): string {
   const typed = input as Record<string, unknown> | undefined;
   switch (toolName) {
     case "computer_list_apps": return "Inspecting available applications";
@@ -843,7 +1017,7 @@ function isReadOnlyTool(toolName: ComputerToolName): boolean {
   return toolName === "computer_list_apps" || toolName === "computer_list_windows" || toolName === "computer_inspect_window" || toolName === "computer_capture_screen";
 }
 
-function detailForTimeline(toolName: ComputerToolName, output: ToolOutput): string | undefined {
+export function detailForTimeline(toolName: ComputerToolName, output: ToolOutput): string | undefined {
   if (toolName === "computer_type_text") return "Text input sent; content omitted from logs.";
   if (output.type === "content") return "Screenshot sent to the model for visual verification.";
   if (toolName === "computer_finish") return "Task marked complete by the agent.";

@@ -51,7 +51,7 @@ let childExit;
 try {
   if (!skipPreflight) {
     console.log("Running the Windows preflight before opening the qualification harness…");
-    const preflight = spawnSync("pnpm.cmd", ["verify:windows"], { cwd: repositoryRoot, stdio: "inherit", windowsHide: false });
+    const preflight = spawnSync("pnpm.cmd", ["verify:windows"], { cwd: repositoryRoot, stdio: "inherit", windowsHide: false, shell: true });
     if (preflight.status !== 0 || preflight.error) {
       resultDocument.preflight = "FAILED";
       throw new Error("Windows preflight failed. Fix it before starting GUI qualification.");
@@ -316,7 +316,7 @@ function readEnvironment() {
 }
 
 function commandVersion(command, args) {
-  const result = spawnSync(command, args, { cwd: repositoryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+  const result = spawnSync(command, args, { cwd: repositoryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, ...(command.toLowerCase().endsWith(".cmd") ? { shell: true } : {}) });
   return result.status === 0 ? result.stdout.trim().split(/\r?\n/)[0] : null;
 }
 

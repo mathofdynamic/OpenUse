@@ -21,7 +21,7 @@ async function waitForVite() {
 
 try {
   await waitForVite();
-  execFileSync(pnpm, ["exec", "node", `${here}/build-main.mjs`], { stdio: "inherit" });
+  execFileSync(pnpm, ["exec", "node", `${here}/build-main.mjs`], { stdio: "inherit", ...(process.platform === "win32" ? { shell: true } : {}) });
   const electron = spawn(pnpm, ["exec", "electron", "."], {
     stdio: "inherit",
     env: { ...process.env, VITE_DEV_SERVER_URL: devUrl },
