@@ -546,6 +546,20 @@ h1, h2, h3, h4, p { margin-top: 0; }
 .permission-dialog h2 { margin: 8px 0 12px; font-size: 24px; line-height: 1.08; }
 .permission-dialog > p { color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
 .permission-dialog > p strong { color: var(--text-primary); }
+.thread-delete-backdrop { z-index: 70; }
+.thread-delete-dialog { width: min(440px, 100%); padding: 24px; border: 1px solid var(--border-strong); border-radius: 12px; background: rgba(16,16,16,.98); box-shadow: 0 24px 70px rgba(0,0,0,.55); }
+.thread-delete-icon { display: grid; place-items: center; width: 42px; height: 42px; margin-bottom: 18px; border: 1px solid color-mix(in srgb, var(--danger) 42%, transparent); border-radius: 10px; color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.thread-delete-icon .glyph { width: 17px; height: 17px; }
+.thread-delete-dialog h2 { margin: 8px 0 10px; color: var(--text-primary); font-size: 22px; letter-spacing: -.04em; line-height: 1.12; }
+.thread-delete-dialog > p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
+.thread-delete-preview { display: grid; gap: 5px; margin: 18px 0 20px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 7px; background: rgba(255,255,255,.025); }
+.thread-delete-preview span { color: var(--text-muted); font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.thread-delete-preview strong { overflow: hidden; color: var(--text-primary); font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.thread-delete-actions { justify-content: flex-end; }
+.danger-action { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 34px; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--danger) 68%, transparent); border-radius: 6px; color: #fff; background: color-mix(in srgb, var(--danger) 72%, #200d0d); cursor: pointer; font-size: 11px; font-weight: 650; }
+.danger-action:hover { filter: brightness(1.08); }
+.danger-action:active { transform: translateY(1px); }
+.danger-action .glyph { width: 14px; height: 14px; }
 .risk-label { color: var(--warning); font-weight: 650; }
 .permission-reason { margin: 18px 0; padding: 11px; border: 1px solid var(--border); border-radius: 6px; background: rgba(255,255,255,.025); }
 .permission-reason > span { color: var(--text-muted); font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }

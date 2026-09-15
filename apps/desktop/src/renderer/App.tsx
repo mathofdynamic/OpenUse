@@ -218,6 +218,7 @@ export function App() {
   const [folderFilter, setFolderFilter] = useState("all");
   const [folderFormOpen, setFolderFormOpen] = useState(false);
   const [folderNameDraft, setFolderNameDraft] = useState("");
+  const [threadDeleteTarget, setThreadDeleteTarget] = useState<{ id: string; title: string } | undefined>();
   const [modelSelectionPending, setModelSelectionPending] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState<string | undefined>();
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -471,14 +472,20 @@ export function App() {
     } catch (caught) { setError(caught instanceof Error ? caught.message : "The thread could not be opened."); }
   }
 
-  async function deleteThread(threadId: string) {
+  function requestThreadDelete(threadId: string) {
     if (isRunning) return;
     const target = threadSnapshot.threads.find((thread) => thread.id === threadId);
     if (!target) return;
-    if (!window.confirm(t("Delete thread? Its local task history will be removed."))) return;
-    const wasCurrent = threadSnapshot.currentThreadId === threadId;
+    setThreadDeleteTarget({ id: target.id, title: target.title });
+  }
+
+  async function confirmThreadDelete() {
+    const target = threadDeleteTarget;
+    if (!target) return;
+    setThreadDeleteTarget(undefined);
+    const wasCurrent = threadSnapshot.currentThreadId === target.id;
     try {
-      const snapshot = await runtimeApi.deleteThread(threadId);
+      const snapshot = await runtimeApi.deleteThread(target.id);
       applySnapshot(snapshot);
       if (wasCurrent) {
         resetActivityForThread(snapshot.threads);
@@ -526,7 +533,7 @@ export function App() {
           <button className="rail-link" type="button" disabled={isRunning} onClick={() => setSettingsOpen(true)}><Glyph name="sliders" /><span>{t("Settings")}</span></button>
         </div>
         <ThreadRailSection disabled={isRunning} onNew={createNewThread}>
-          <ThreadPanel variant="rail" snapshot={threadSnapshot} selectedFolder={folderFilter} folderFormOpen={folderFormOpen} folderName={folderNameDraft} disabled={isRunning} onFolderFilter={setFolderFilter} onFolderForm={() => setFolderFormOpen((current) => !current)} onFolderName={setFolderNameDraft} onCreateFolder={() => void createThreadFolder()} onCancelFolder={() => { setFolderFormOpen(false); setFolderNameDraft(""); }} onSelectThread={(threadId) => void selectThread(threadId)} onDeleteThread={(threadId) => void deleteThread(threadId)} onMoveThread={(threadId, folderId) => void moveThread(threadId, folderId)} onNew={createNewThread} />
+          <ThreadPanel variant="rail" snapshot={threadSnapshot} selectedFolder={folderFilter} folderFormOpen={folderFormOpen} folderName={folderNameDraft} disabled={isRunning} onFolderFilter={setFolderFilter} onFolderForm={() => setFolderFormOpen((current) => !current)} onFolderName={setFolderNameDraft} onCreateFolder={() => void createThreadFolder()} onCancelFolder={() => { setFolderFormOpen(false); setFolderNameDraft(""); }} onSelectThread={(threadId) => void selectThread(threadId)} onDeleteThread={requestThreadDelete} onMoveThread={(threadId, folderId) => void moveThread(threadId, folderId)} onNew={createNewThread} />
         </ThreadRailSection>
       </aside>
 
@@ -545,7 +552,7 @@ export function App() {
 
         <div className="compact-thread-wrap">
           <ThreadToolbar thread={currentThread} folder={currentFolder} open={threadPanelOpen} disabled={isRunning} onToggle={() => setThreadPanelOpen((current) => !current)} onNew={createNewThread} />
-          {threadPanelOpen && <ThreadPanel variant="compact" snapshot={threadSnapshot} selectedFolder={folderFilter} folderFormOpen={folderFormOpen} folderName={folderNameDraft} disabled={isRunning} onFolderFilter={setFolderFilter} onFolderForm={() => setFolderFormOpen((current) => !current)} onFolderName={setFolderNameDraft} onCreateFolder={() => void createThreadFolder()} onCancelFolder={() => { setFolderFormOpen(false); setFolderNameDraft(""); }} onSelectThread={(threadId) => void selectThread(threadId)} onDeleteThread={(threadId) => void deleteThread(threadId)} onMoveThread={(threadId, folderId) => void moveThread(threadId, folderId)} onNew={createNewThread} />}
+          {threadPanelOpen && <ThreadPanel variant="compact" snapshot={threadSnapshot} selectedFolder={folderFilter} folderFormOpen={folderFormOpen} folderName={folderNameDraft} disabled={isRunning} onFolderFilter={setFolderFilter} onFolderForm={() => setFolderFormOpen((current) => !current)} onFolderName={setFolderNameDraft} onCreateFolder={() => void createThreadFolder()} onCancelFolder={() => { setFolderFormOpen(false); setFolderNameDraft(""); }} onSelectThread={(threadId) => void selectThread(threadId)} onDeleteThread={requestThreadDelete} onMoveThread={(threadId, folderId) => void moveThread(threadId, folderId)} onNew={createNewThread} />}
         </div>
 
         <div className="content-wrap">
@@ -568,6 +575,7 @@ export function App() {
 
       {permission && <PermissionDialog request={permission} onDecision={(decision) => { void runtimeApi.decidePermission(permission.id, decision); setPermission(undefined); }} onStop={() => { setPermission(undefined); void stopTask(); }} />}
       {settingsOpen && <SettingsDialog settings={settings} models={models} catalogStatus={catalogStatus} usage={usage} namedProviders={namedProviderStatuses} apiKeyDraft={apiKeyDraft} customKeyDraft={customKeyDraft} onApiKeyChange={setApiKeyDraft} onCustomKeyChange={setCustomKeyDraft} onClose={() => setSettingsOpen(false)} onSaveGateway={(modelId) => void saveGateway(modelId)} onSaveCustom={saveCustomProvider} onSaveNamed={saveNamedProvider} onTestConnection={(modelId) => void testConnection(modelId)} connectionTest={connectionTest} onProvider={(provider) => void runtimeApi.setProvider(provider).then(applySnapshot)} onLocale={updateLocale} onReasoning={updateReasoning} onAppearance={updateAppearance} onRefreshModels={() => void runtimeApi.refreshModelCatalog().then(applySnapshot)} onRefreshNamed={(provider) => void runtimeApi.refreshNamedProvider(provider).then(applySnapshot)} onResetUsage={() => void runtimeApi.resetUsage().then(applySnapshot)} onPermissionChange={(appName, level, appIdentity) => void updatePermission(appName, level, appIdentity)} onRunSelfTest={() => void runtimeApi.runSelfTest()} onOpenMacPrivacy={(area) => void runtimeApi.openMacPrivacy(area)} />}
+      {threadDeleteTarget && <DeleteThreadDialog threadTitle={threadDeleteTarget.title} onCancel={() => setThreadDeleteTarget(undefined)} onConfirm={() => void confirmThreadDelete()} />}
       </div>
     </div>
     </LocaleContext.Provider>
@@ -732,6 +740,37 @@ function reasoningModelForSettings(settings: AppSettings, models: ModelDefinitio
   if (settings.provider === "vercel-gateway") return models.find((model) => model.id === settings.modelId);
   if (settings.provider === "custom-openai-compatible") return { id: settings.customProvider.modelId, label: settings.customProvider.modelId, provider: settings.provider, capabilities: settings.customProvider.capabilities };
   return namedProviderModelFor(settings, namedProviders);
+}
+
+function DeleteThreadDialog({ threadTitle, onCancel, onConfirm }: { threadTitle: string; onCancel(): void; onConfirm(): void }) {
+  const { t } = useTranslation();
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    cancelRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onCancel]);
+
+  return <div className="modal-backdrop thread-delete-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+    <div className="thread-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="thread-delete-title" aria-describedby="thread-delete-description">
+      <div className="thread-delete-icon"><Glyph name="trash" /></div>
+      <div className="dialog-eyebrow">{t("Thread action")}</div>
+      <h2 id="thread-delete-title">{t("Delete this thread?")}</h2>
+      <p id="thread-delete-description">{t("Local task history for this thread will be removed.")}</p>
+      <div className="thread-delete-preview"><span>{t("Thread")}</span><strong title={threadTitle}>{threadTitle}</strong></div>
+      <div className="dialog-actions thread-delete-actions">
+        <button ref={cancelRef} className="secondary-action" type="button" onClick={onCancel}>{t("Cancel")}</button>
+        <button className="danger-action" type="button" onClick={onConfirm}><Glyph name="trash" />{t("Delete thread")}</button>
+      </div>
+    </div>
+  </div>;
 }
 
 function SettingsDialog({ settings, models, catalogStatus, usage, namedProviders, apiKeyDraft, customKeyDraft, onApiKeyChange, onCustomKeyChange, onClose, onSaveGateway, onSaveCustom, onSaveNamed, onTestConnection, connectionTest, onProvider, onLocale, onReasoning, onAppearance, onRefreshModels, onRefreshNamed, onResetUsage, onPermissionChange, onRunSelfTest, onOpenMacPrivacy }: {
