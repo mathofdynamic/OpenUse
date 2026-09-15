@@ -576,6 +576,7 @@ h1, h2, h3, h4, p { margin-top: 0; }
 .app-shell-rtl .model-picker-trigger,
 .app-shell-rtl .model-option,
 .app-shell-rtl .settings-nav button { text-align: right; }
+.app-shell-rtl .model-picker-popover { inset-inline-start: 0; inset-inline-end: auto; }
 .app-shell-rtl .settings-nav button { border-inline-start: 0; border-inline-end: 2px solid transparent; border-radius: 5px 0 0 5px; }
 .app-shell-rtl .settings-nav button.settings-nav-active { border-inline-start: 0; border-inline-end-color: var(--primary); }
 .app-shell-rtl .model-option-id,
